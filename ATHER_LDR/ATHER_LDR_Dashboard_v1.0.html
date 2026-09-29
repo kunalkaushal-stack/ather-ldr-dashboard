@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -3522,6 +3522,36 @@ const PivotTab = React.memo(function PivotTab({ data, filters, months, RT, onDet
   );
 });
 
+
+const FilterBar = React.memo(function FilterBar({ data, filters, onFiltersChange, RT, setRT, viewerMode, clientMode }) {
+  if (!data || !data.maps) return null;
+  const { maps } = data;
+  const monthOpts = [...new Set(maps.lm)].sort((a, b) => atherMonthOrder(b) - atherMonthOrder(a));
+  const srcOpts   = [...new Set(maps.src)].filter(Boolean).sort();
+  const ltOpts    = [...new Set(maps.lt)].filter(Boolean).sort();
+  const mdlOpts   = [...new Set(maps.mdl)].filter(Boolean).sort();
+  const stOpts    = [...new Set(maps.st)].filter(Boolean).sort();
+  function upd(key, val) { onFiltersChange({ ...filters, [key]: val }); }
+  const hide = viewerMode || clientMode;
+  return ce('div', { style: { display:'flex', gap:8, flexWrap:'wrap', alignItems:'center' } },
+    ce(MultiSelect, { label:'Month', options:monthOpts, selected:filters.months, onChange:v=>upd('months',v) }),
+    !hide && ce(MultiSelect, { label:'Source', options:srcOpts, selected:filters.sources, onChange:v=>upd('sources',v) }),
+    !hide && ce(MultiSelect, { label:'Lead Type', options:ltOpts, selected:filters.leadTypes, onChange:v=>upd('leadTypes',v) }),
+    ce(MultiSelect, { label:'Model', options:mdlOpts, selected:filters.models, onChange:v=>upd('models',v) }),
+    ce(MultiSelect, { label:'State', options:stOpts, selected:filters.states, onChange:v=>upd('states',v) }),
+    !hide && ce('div', { style:{ display:'flex', gap:4, alignItems:'center', marginLeft:8 } },
+      ce('span', { style:{ fontSize:11, color:'#64748B', fontWeight:600 } }, 'Retail:'),
+      ['all','dms','co'].map(v =>
+        ce('button', { key:v, onClick:()=>setRT(v), style:{
+          fontSize:11, padding:'3px 10px', borderRadius:6, cursor:'pointer', fontFamily:'inherit', fontWeight:600,
+          background: RT===v ? '#0891B2' : '#F1F5F9',
+          color:      RT===v ? '#fff'    : '#475569',
+          border:     RT===v ? '1px solid #0891B2' : '1px solid #E2E8F0'
+        }}, v==='all'?'All':v==='dms'?'DMS':'Call-Out')
+      )
+    )
+  );
+});
 /* ════════════════════════════════════════════════════════════════════
    APP ROOT — Ather LDR Dashboard
    ════════════════════════════════════════════════════════════════════ */
