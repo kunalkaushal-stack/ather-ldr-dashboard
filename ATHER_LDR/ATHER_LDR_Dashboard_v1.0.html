@@ -3552,6 +3552,159 @@ const FilterBar = React.memo(function FilterBar({ data, filters, onFiltersChange
     )
   );
 });
+
+// ── LTSourceTab ──────────────────────────────────────────────────────
+const LTSourceTab = React.memo(function LTSourceTab({ data, filters, months, RT, viewerMode, clientMode, onDetailedCsv }) {
+  var maps = data.maps, ltm = data.ltm || [];
+  var getLR = useMemo(function(){ return makeLR(data.rt_cols, RT); }, [data.rt_cols, RT]);
+  var allSrcs = useMemo(function(){ return [...new Set(maps.src)]; }, [maps]);
+  var srcGroups = useMemo(function(){ return buildSrcGroups(allSrcs); }, [allSrcs]);
+  var _eg = useState(new Set()); var expandedGrps = _eg[0]; var setExpandedGrps = _eg[1];
+  var onToggleGrp = useCallback(function(id){ setExpandedGrps(function(prev){ var n=new Set(prev); n.has(id)?n.delete(id):n.add(id); return n; }); }, []);
+  var renderAgg = useCallback(function(M){
+    var allLT = !filters.leadTypes || filters.leadTypes.size===0;
+    var getLR_leads = function(row){ return [row[row.length-4], 0]; };
+    var ltDimFn = function(row, maps){ var lt=maps.lt[row[0]]; return (!allLT && !filters.leadTypes.has(lt)) ? null : (lt||'Unknown'); };
+    var srcFn   = function(row, maps){ return maps.src[row[1]]; };
+    var monthFn = function(row, maps){ return maps.lm[row[2]]; };
+    var leadsAgg  = aggMonth(ltm, maps, M, filters.sources, ltDimFn, srcFn, monthFn, null, getLR_leads);
+    var retailAgg = aggMonth(ltm, maps, M, filters.sources, ltDimFn, srcFn, monthFn, null, getLR);
+    return mergeLeadRetailAggs(leadsAgg, retailAgg);
+  }, [ltm, maps, filters, getLR]);
+  return ce(MonthlyGrids, { title:'LT \u00d7 Source', months:months, renderAgg:renderAgg, srcGroups:srcGroups, dimLabel:'Lead Type', expandedGrps:expandedGrps, onToggleGrp:onToggleGrp, viewerMode:viewerMode, onDetailedCsv:onDetailedCsv });
+});
+
+// ── ModelSourceTab ────────────────────────────────────────────────────
+const ModelSourceTab = React.memo(function ModelSourceTab({ data, filters, months, RT, viewerMode, clientMode, onDetailedCsv }) {
+  var maps = data.maps, mm = data.mm || [];
+  var getLR = useMemo(function(){ return makeLR(data.rt_cols, RT); }, [data.rt_cols, RT]);
+  var allSrcs = useMemo(function(){ return [...new Set(maps.src)]; }, [maps]);
+  var srcGroups = useMemo(function(){ return buildSrcGroups(allSrcs); }, [allSrcs]);
+  var _eg = useState(new Set()); var expandedGrps = _eg[0]; var setExpandedGrps = _eg[1];
+  var onToggleGrp = useCallback(function(id){ setExpandedGrps(function(prev){ var n=new Set(prev); n.has(id)?n.delete(id):n.add(id); return n; }); }, []);
+  var renderAgg = useCallback(function(M){
+    var allMdl = !filters.models || filters.models.size===0;
+    var getLR_leads = function(row){ return [row[row.length-4], 0]; };
+    var mdlDimFn = function(row, maps){ var mdl=maps.mdl[row[0]]; return (!allMdl && !filters.models.has(mdl)) ? null : (mdl||'Unknown'); };
+    var srcFn   = function(row, maps){ return maps.src[row[1]]; };
+    var monthFn = function(row, maps){ return maps.lm[row[2]]; };
+    var leadsAgg  = aggMonth(mm, maps, M, filters.sources, mdlDimFn, srcFn, monthFn, null, getLR_leads);
+    var retailAgg = aggMonth(mm, maps, M, filters.sources, mdlDimFn, srcFn, monthFn, null, getLR);
+    return mergeLeadRetailAggs(leadsAgg, retailAgg);
+  }, [mm, maps, filters, getLR]);
+  return ce(MonthlyGrids, { title:'Model Performance', months:months, renderAgg:renderAgg, srcGroups:srcGroups, dimLabel:'Model', expandedGrps:expandedGrps, onToggleGrp:onToggleGrp, viewerMode:viewerMode, onDetailedCsv:onDetailedCsv });
+});
+
+// ── StateSourceTab ────────────────────────────────────────────────────
+const StateSourceTab = React.memo(function StateSourceTab({ data, filters, months, RT, viewerMode, clientMode, onDetailedCsv }) {
+  var maps = data.maps, stm = data.stm || [];
+  var getLR = useMemo(function(){ return makeLR(data.rt_cols, RT); }, [data.rt_cols, RT]);
+  var allSrcs = useMemo(function(){ return [...new Set(maps.src)]; }, [maps]);
+  var srcGroups = useMemo(function(){ return buildSrcGroups(allSrcs); }, [allSrcs]);
+  var _eg = useState(new Set()); var expandedGrps = _eg[0]; var setExpandedGrps = _eg[1];
+  var onToggleGrp = useCallback(function(id){ setExpandedGrps(function(prev){ var n=new Set(prev); n.has(id)?n.delete(id):n.add(id); return n; }); }, []);
+  var renderAgg = useCallback(function(M){
+    var allSt = !filters.states || filters.states.size===0;
+    var getLR_leads = function(row){ return [row[row.length-4], 0]; };
+    var stDimFn = function(row, maps){ var st=maps.st[row[0]]; return (!allSt && !filters.states.has(st)) ? null : (st||'Unknown'); };
+    var srcFn   = function(row, maps){ return maps.src[row[1]]; };
+    var monthFn = function(row, maps){ return maps.lm[row[2]]; };
+    var leadsAgg  = aggMonth(stm, maps, M, filters.sources, stDimFn, srcFn, monthFn, null, getLR_leads);
+    var retailAgg = aggMonth(stm, maps, M, filters.sources, stDimFn, srcFn, monthFn, null, getLR);
+    return mergeLeadRetailAggs(leadsAgg, retailAgg);
+  }, [stm, maps, filters, getLR]);
+  return ce(MonthlyGrids, { title:'State Performance', months:months, renderAgg:renderAgg, srcGroups:srcGroups, dimLabel:'State', expandedGrps:expandedGrps, onToggleGrp:onToggleGrp, viewerMode:viewerMode, onDetailedCsv:onDetailedCsv });
+});
+
+// ── GeoAndDealerTab ───────────────────────────────────────────────────
+const GeoAndDealerTab = React.memo(function GeoAndDealerTab({ data, filters, months, rawJoined, leadsMode, viewerMode, clientMode }) {
+  var _s = useState(''); var search = _s[0]; var setSearch = _s[1];
+  var _sc = useState('leads'); var sortCol = _sc[0]; var setSortCol = _sc[1];
+  var _sd = useState(-1); var sortDir = _sd[0]; var setSortDir = _sd[1];
+
+  var tableData = useMemo(function(){
+    if (!rawJoined) return [];
+    var acc = {};
+    var activeMonths = new Set(months || []);
+    var allM = !months || months.length === 0;
+    for (var i = 0; i < rawJoined.length; i++) {
+      var r = rawJoined[i];
+      var rowMonth = (leadsMode === 'update' && r.isBooked && r.booking_month) ? r.booking_month : r.lead_month;
+      if (!allM && !activeMonths.has(rowMonth)) continue;
+      if (filters.sources && filters.sources.size > 0 && !filters.sources.has(r.source)) continue;
+      if (filters.states  && filters.states.size  > 0 && !filters.states.has(r.state))   continue;
+      if (filters.cities  && filters.cities.size  > 0 && !filters.cities.has(r.city))    continue;
+      var dealer = r.dealerName || r.verifiedDealer || '';
+      var state  = r.state  || 'Unknown';
+      var region = (r.region || '').trim() || state;
+      var city   = r.city   || '';
+      var oemCrmId = r.oemCrmId || '';
+      var key = oemCrmId + '\x00' + dealer + '\x00' + state + '\x00' + city;
+      if (!acc[key]) acc[key] = { oemCrmId:oemCrmId, dealer:dealer, state:state, region:region, city:city, leads:0, retail:0 };
+      acc[key].leads++;
+      if (isRetailedLead && isRetailedLead(r)) acc[key].retail++;
+    }
+    return Object.values(acc);
+  }, [rawJoined, filters, months, leadsMode]);
+
+  var sorted = useMemo(function(){
+    var q = search.toLowerCase();
+    var rows = search
+      ? tableData.filter(function(r){ return (r.dealer||'').toLowerCase().includes(q)||(r.state||'').toLowerCase().includes(q)||(r.city||'').toLowerCase().includes(q)||(r.oemCrmId||'').toLowerCase().includes(q); })
+      : tableData;
+    var sc = sortCol, sd = sortDir;
+    return rows.slice().sort(function(a,b){ var av=a[sc],bv=b[sc]; if(typeof av==='string') return sd*av.localeCompare(bv); return sd*((av||0)-(bv||0)); });
+  }, [tableData, search, sortCol, sortDir]);
+
+  function toggleSort(col){ if(sortCol===col) setSortDir(function(d){return -d;}); else{setSortCol(col);setSortDir(-1);} }
+
+  function TH(col, label, align){
+    var active = sortCol===col;
+    return ce('th',{ onClick:function(){toggleSort(col);}, style:{ cursor:'pointer', textAlign:align||'right', padding:'6px 10px', fontSize:11, fontWeight:700, color:active?'#0891B2':'#475569', background:'#F8FAFC', borderBottom:'2px solid #E2E8F0', userSelect:'none', whiteSpace:'nowrap' } }, label+(active?(sortDir<0?' \u25bc':' \u25b2'):''));
+  }
+
+  function Nf2(v){ return (v||0).toLocaleString('en-IN'); }
+  function pct(r,l){ return l>0?(r/l*100).toFixed(1)+'%':'—'; }
+
+  return ce('div', null,
+    ce('div', { style:{ display:'flex', alignItems:'center', gap:12, marginBottom:12 } },
+      ce('input',{ placeholder:'Search dealer, state, city\u2026', value:search, onChange:function(e){setSearch(e.target.value);}, style:{ padding:'6px 12px', borderRadius:8, border:'1px solid #CBD5E1', fontSize:12, width:260, fontFamily:'inherit', outline:'none' } }),
+      ce('span', { style:{ fontSize:12, color:'#64748B' } }, sorted.length.toLocaleString('en-IN')+' dealers')
+    ),
+    ce('div',{ style:{ overflowX:'auto' } },
+      ce('table',{ style:{ width:'100%', borderCollapse:'collapse', fontSize:12 } },
+        ce('thead',null,
+          ce('tr',null,
+            TH('oemCrmId','Dealer Code','left'), TH('dealer','Dealer','left'),
+            TH('state','State','left'), TH('region','Region','left'), TH('city','City','left'),
+            TH('leads','Leads','right'), TH('retail','Retail','right'),
+            ce('th',{ style:{ textAlign:'right', padding:'6px 10px', fontSize:11, fontWeight:700, color:'#475569', background:'#F8FAFC', borderBottom:'2px solid #E2E8F0', whiteSpace:'nowrap' } },'Conv%')
+          )
+        ),
+        ce('tbody',null,
+          sorted.map(function(r){
+            return ce('tr',{ key:r.oemCrmId+r.dealer+r.state+r.city, style:{ borderBottom:'1px solid #F1F5F9' } },
+              ce('td',{ style:{ padding:'5px 10px', color:'#64748B', fontFamily:'monospace', fontSize:11 } }, r.oemCrmId),
+              ce('td',{ style:{ padding:'5px 10px', fontWeight:500 } }, r.dealer||'\u2014'),
+              ce('td',{ style:{ padding:'5px 10px' } }, r.state),
+              ce('td',{ style:{ padding:'5px 10px', color:'#64748B' } }, r.region),
+              ce('td',{ style:{ padding:'5px 10px', color:'#64748B' } }, r.city),
+              ce('td',{ style:{ padding:'5px 10px', textAlign:'right', fontWeight:600 } }, Nf2(r.leads)),
+              ce('td',{ style:{ padding:'5px 10px', textAlign:'right', fontWeight:600, color:'#0891B2' } }, Nf2(r.retail)),
+              ce('td',{ style:{ padding:'5px 10px', textAlign:'right', color:r.retail>0?'#15803D':'#94A3B8' } }, pct(r.retail,r.leads))
+            );
+          })
+        )
+      )
+    )
+  );
+});
+
+// ── Stub components (tabs not reachable in current UI) ────────────────
+const CitySourceTab  = function(){ return null; };
+const StateModelTab  = function(){ return null; };
+const CityModelTab   = function(){ return null; };
+const DispersionTab  = function(){ return null; };
 /* ════════════════════════════════════════════════════════════════════
    APP ROOT — Ather LDR Dashboard
    ════════════════════════════════════════════════════════════════════ */
