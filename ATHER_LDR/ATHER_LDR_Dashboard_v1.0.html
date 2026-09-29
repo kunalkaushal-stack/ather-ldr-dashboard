@@ -3704,7 +3704,6 @@ const GeoAndDealerTab = React.memo(function GeoAndDealerTab({ data, filters, mon
 const CitySourceTab  = function(){ return null; };
 const StateModelTab  = function(){ return null; };
 const CityModelTab   = function(){ return null; };
-const DispersionTab  = function(){ return null; };
 /* ════════════════════════════════════════════════════════════════════
    APP ROOT — Ather LDR Dashboard
    ════════════════════════════════════════════════════════════════════ */
@@ -3717,7 +3716,6 @@ const TABS = [
   { id:'modelxsrc',       label:'Model Performance' },
   { id:'statexsrc',       label:'State Performance' },
   { id:'geodealer',       label:'Geo & Dealer' },
-  { id:'dispersion',      label:'Retail Dispersion' },
   { id:'pivot',           label:'Pivot Table' },
 ];
 
@@ -4092,7 +4090,6 @@ function App({fbUser,role,presence,onSignOut,onAdminOpen}){
       case 'statexmodel': return ce(StateModelTab,    props);
       case 'cityxmodel':  return ce(CityModelTab,     props);
       case 'geodealer':       return ce(GeoAndDealerTab,      {...props,rawJoined,leadsMode});
-      case 'dispersion':      return ce(DispersionTab,       props);
       case 'pivot':       return ce(PivotTab,         {...props,rawJoined,leadsMode});
       default: return null;
     }
