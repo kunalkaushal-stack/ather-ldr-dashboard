@@ -2297,7 +2297,7 @@ const OverviewTab = React.memo(function OverviewTab({ data, filters, RT }) {
 /* ════════════════════════════════════════════════════════════════════
    SOURCE ANALYSIS TAB
    ════════════════════════════════════════════════════════════════════ */
-const ENQUIRY_CAT = new Set(['Direct Push', 'L1 Nurtured']);
+const ENQUIRY_STATUS = 'L1 Verified (Callback Scheduled)';
 const SourceTab = React.memo(function SourceTab({ data, rawData, filters, months, RT, onDetailedCsv, nsRetailRows, rawJoined }) {
   const { maps, sm, univ: univRaw, csm: csmRaw } = data;
   const univ = univRaw || [];
@@ -2432,7 +2432,7 @@ const SourceTab = React.memo(function SourceTab({ data, rawData, filters, months
     const allMd4 = !filters.models    || filters.models.size    === 0;
     for (const r of rawJ) {
       if (r.lead_month !== M) continue;
-      if (!ENQUIRY_CAT.has(String(r.webId||'').trim())) continue;
+      if ((r.statusName||'').trim() !== ENQUIRY_STATUS) continue;
       if (!allS4  && (filters.sources === FILTER_CLEARED || !filters.sources.has(r.source))) continue;
       if (!allSt4 && (filters.states  === FILTER_CLEARED || !filters.states.has(r.state)))  continue;
       if (!allCt4 && (filters.cities  === FILTER_CLEARED || !filters.cities.has(r.city)))   continue;
@@ -2616,7 +2616,7 @@ const SourceTab = React.memo(function SourceTab({ data, rawData, filters, months
     const allMd4b = !filters.models  || filters.models.size   === 0;
     for (const r of rawJ2) {
       if (!mSet.has(r.lead_month)) continue;
-      if (!ENQUIRY_CAT.has(String(r.webId||'').trim())) continue;
+      if ((r.statusName||'').trim() !== ENQUIRY_STATUS) continue;
       if (!allS4b  && (filters.sources === FILTER_CLEARED || !filters.sources.has(r.source))) continue;
       if (!allSt4b && (filters.states  === FILTER_CLEARED || !filters.states.has(r.state)))  continue;
       if (!allCt4b && (filters.cities  === FILTER_CLEARED || !filters.cities.has(r.city)))   continue;
