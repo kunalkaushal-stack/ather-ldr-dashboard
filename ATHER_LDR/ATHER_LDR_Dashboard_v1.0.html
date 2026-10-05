@@ -839,10 +839,7 @@ function buildPayload(joinedRows){
   for(const r of joinedRows) city_state[cityMap[r.city||'Unknown']]=stMap[r.state||'Unknown'];
 
   function isRetailed(r){
-    if(!r.isBooked||!r.booking_month||!r.lead_month)return false;
-    const d=atherMonthOrder(r.booking_month)-atherMonthOrder(r.lead_month);
-    if(d<0||d>2)return false;
-    return ATHER_SCOPE_MODELS.has(canonPurMdl(r.purchasedModel||''));
+    return !!(r.isBooked&&r.booking_month);
   }
 
   // On Create accumulators (lead_month dimension, all leads + unique subset)
