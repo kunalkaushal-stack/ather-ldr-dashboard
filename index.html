@@ -620,8 +620,8 @@ function parseAtherLeadRows(raw){
 
 function parseAtherRetailRows(raw){
   if(!raw.length)return{rows:[],diagnostics:{totalRows:0,reRows:0,uniqueIds:0,
-    excludedEligibility:0,excludedKey:0,excludedMonth:0,
-    eligibilityColFound:false,orderIdColFound:false,retailMonthColFound:false,
+    excludedEligibility:0,excludedKey:0,excludedMonth:0,excludedDupOrderId:0,
+    eligibilityColFound:false,leadIdColFound:false,orderIdColFound:false,retailMonthColFound:false,
     includedModelValues:[],allRetailCols:[],rawKeySamples:[],eligibilityValues:[]},maxRetailDate:null};
   const keyMap={};
   Object.keys(raw[0]).forEach(rk=>{keyMap[rk.toLowerCase().replace(/\s+/g,' ').trim()]=rk;});
@@ -634,62 +634,74 @@ function parseAtherRetailRows(raw){
     }
     return'';
   }
-  // Detect Payment Eligibility column
-  const ELIG_ALIASES=['payment eligibility','paymenteligibility','payment_eligibility','eligibility','payment eligible'];
+  // Detect columns
+  // Lead ID = join key (matches opty_id in lead master, e.g. "00QS400000klorjMAA")
+  const LEAD_ID_ALIASES=['lead id','leadid','lead_id','opty_id','opty id','optyid','opportunity id','opportunity_id'];
+  let leadIdColKey=null;
+  for(const a of LEAD_ID_ALIASES){if(keyMap[a]){leadIdColKey=keyMap[a];break;}}
+  // Order ID = unique retail identifier for dedup (e.g. "5984575")
+  const ORDER_ID_ALIASES=['order id','orderid','order_id'];
+  let orderIdColKey=null;
+  for(const a of ORDER_ID_ALIASES){if(keyMap[a]){orderIdColKey=keyMap[a];break;}}
+  // Payment Eligibility column
+  const ELIG_ALIASES=['payment eligibility','paymenteligibility','payment_eligibility','eligibility'];
   let eligColKey=null;
   for(const a of ELIG_ALIASES){if(keyMap[a]){eligColKey=keyMap[a];break;}}
-  // Detect Order ID column (join key to leads)
-  const KEY_ALIASES=['order id','orderid','order_id','sourcelead id','sourcelead_id',
-    'source lead id','source_lead_id','sourceleadid','lead id','leadid','optyid','opty id','opty_id'];
-  let orderIdColKey=null;
-  for(const a of KEY_ALIASES){if(keyMap[a]){orderIdColKey=keyMap[a];break;}}
-  // Detect retail date column (optional)
-  const DATE_ALIASES=['retail_attribution_date','retailattributiondate','attribution date',
-    'attribution_date','retail date','retaildate','retail_date','date','retail attribution date'];
+  // Retail date column (optional)
+  const DATE_ALIASES=['retail date','retaildate','retail_date','retail_attribution_date',
+    'retailattributiondate','attribution date','attribution_date','date'];
   let retailDateColKey=null;
   for(const a of DATE_ALIASES){if(keyMap[a]){retailDateColKey=keyMap[a];break;}}
-  // Collect sample eligibility values for diagnostics
+  // Collect eligibility value distribution for diagnostics
   const eligValMap=new Map();
   const rows=[];
-  let excludedEligibility=0,excludedKey=0,excludedMonth=0;
+  let excludedEligibility=0,excludedKey=0,excludedMonth=0,excludedDupOrderId=0;
   let maxRetailDate=null;
   const rawKeySamples=[];
   const includedModelMap=new Map();
+  const seenOrderIds=new Set(); // deduplicate by Order ID
   for(const r of raw){
-    // Track eligibility values
+    // Track all eligibility values
     const elig=eligColKey?String(r[eligColKey]||'').trim():get(r,ELIG_ALIASES);
     eligValMap.set(elig||'(empty)',(eligValMap.get(elig||'(empty)')||0)+1);
-    // Filter: Payment Eligibility must be "Eligible"
+    // Filter 1: Payment Eligibility must be "Eligible"
     if(elig.toLowerCase()!=='eligible'){excludedEligibility++;continue;}
-    // Order ID (join key)
-    const sourceLeadId=orderIdColKey?String(r[orderIdColKey]||'').trim():get(r,KEY_ALIASES);
+    // Join key: Lead ID (Salesforce opty_id format, e.g. 00QS4000...)
+    const sourceLeadId=leadIdColKey?String(r[leadIdColKey]||'').trim():get(r,LEAD_ID_ALIASES);
     if(!sourceLeadId){excludedKey++;continue;}
-    // Retail Month
+    // Retail Month (format: "Apr'26" or "Apr'2026")
     const performanceMonth=normalizeAtherMonth(get(r,['retail month','retailmonth','retail_month',
       'performance month','performancemonth','performance_month','month']));
     if(!performanceMonth||atherMonthOrder(performanceMonth)<CUTOFF_MONTH_ORDER_CLEAR){excludedMonth++;continue;}
-    if(rawKeySamples.length<10)rawKeySamples.push(sourceLeadId);
-    // Date (optional — don't exclude if missing)
+    // Order ID dedup: skip if this Order ID already attributed
+    const orderId=orderIdColKey?String(r[orderIdColKey]||'').trim():get(r,ORDER_ID_ALIASES);
+    if(orderId){
+      if(seenOrderIds.has(orderId)){excludedDupOrderId++;continue;}
+      seenOrderIds.add(orderId);
+    }
+    if(rawKeySamples.length<10)rawKeySamples.push(sourceLeadId+'(order:'+orderId+')');
+    // Date (optional)
     const dateStr=retailDateColKey?String(r[retailDateColKey]||'').trim():get(r,DATE_ALIASES);
     const retailDate=parseAtherDate(dateStr)||null;
-    if(retailDate&&retailDate>=(maxRetailDate||retailDate))maxRetailDate=retailDate;
+    if(retailDate&&(!maxRetailDate||retailDate>maxRetailDate))maxRetailDate=retailDate;
     const ctRaw=get(r,['call type','calltype','call_type','call-type']);
     const ctLow=(ctRaw||'').toLowerCase();
     const callType=ctLow.includes('dms')?'dms':ctLow.includes('call')?'co':'other';
-    const purchasedModel=get(r,['retail model','retail_model','retailmodel','purchasedmodel',
-      'purchased model','purchased_model','purchasedmodelname','purchased model name',
-      'model','model name','vehicle model','vehicle_model','product','product name',
-      'vehicle name','vehiclename','vehicle','model_name','productname']);
+    const purchasedModel=get(r,['retail model','retail_model','retailmodel','booking model',
+      'bookingmodel','booking_model','purchasedmodel','purchased model','model','model name']);
     includedModelMap.set(purchasedModel||'(blank)',(includedModelMap.get(purchasedModel||'(blank)')||0)+1);
-    rows.push({sourceLeadId,performanceMonth,callType,retailDate,purchasedModel});
+    rows.push({sourceLeadId,orderId,performanceMonth,callType,retailDate,purchasedModel});
   }
   const uniqueIds=new Set(rows.map(r=>r.sourceLeadId)).size;
+  const uniqueOrders=seenOrderIds.size;
   const eligibilityValues=[...eligValMap.entries()].sort((a,b)=>b[1]-a[1]).slice(0,20).map(([v,c])=>v+'('+c+')');
   const includedModelValues=[...includedModelMap.entries()].sort((a,b)=>b[1]-a[1]);
   return{rows,diagnostics:{
-    totalRows:raw.length,reRows:rows.length,uniqueIds,
-    excludedEligibility,excludedKey,excludedMonth,
-    eligibilityColFound:!!eligColKey,orderIdColFound:!!orderIdColKey,retailMonthColFound:!!keyMap['retail month']||!!keyMap['retailmonth'],
+    totalRows:raw.length,reRows:rows.length,uniqueIds,uniqueOrders,
+    excludedEligibility,excludedKey,excludedMonth,excludedDupOrderId,
+    eligibilityColFound:!!eligColKey,leadIdColFound:!!leadIdColKey,
+    orderIdColFound:!!orderIdColKey,
+    retailMonthColFound:!!(keyMap['retail month']||keyMap['retailmonth']||keyMap['retail_month']),
     eligibilityValues,includedModelValues,allRetailCols,rawKeySamples
   },maxRetailDate};
 }
@@ -734,9 +746,10 @@ function joinREData(leadResult,retailResult){
     leadEarliestDate:leadDiag.earliestDate,leadLatestDate:leadDiag.latestDate,
     retailTotalRows:retailDiag.totalRows,retailHeroRows:retailDiag.reRows,retailUniqueIds:retailDiag.uniqueIds,
     retailExcludedEligibility:retailDiag.excludedEligibility,retailExcludedKey:retailDiag.excludedKey,
-    retailExcludedMonth:retailDiag.excludedMonth,
-    retailEligibilityColFound:retailDiag.eligibilityColFound,retailOrderIdColFound:retailDiag.orderIdColFound,
-    retailMonthColFound:retailDiag.retailMonthColFound,
+    retailExcludedMonth:retailDiag.excludedMonth,retailExcludedDupOrderId:retailDiag.excludedDupOrderId,
+    retailEligibilityColFound:retailDiag.eligibilityColFound,retailLeadIdColFound:retailDiag.leadIdColFound,
+    retailOrderIdColFound:retailDiag.orderIdColFound,retailMonthColFound:retailDiag.retailMonthColFound,
+    retailUniqueOrders:retailDiag.uniqueOrders,
     retailEligibilityValues:retailDiag.eligibilityValues,
     retailRawKeySamples:retailDiag.rawKeySamples,keyMatchSamples,
     retailKeyCount:retailKeySet.size,leadKeyCount:leadKeySet.size,
