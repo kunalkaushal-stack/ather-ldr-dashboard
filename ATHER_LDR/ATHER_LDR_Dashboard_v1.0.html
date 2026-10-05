@@ -619,39 +619,13 @@ function parseAtherLeadRows(raw){
 }
 
 function parseAtherRetailRows(raw){
-  if(!raw.length)return{rows:[],diagnostics:{totalRows:0,reRows:0,uniqueIds:0,excludedBrand:0,excludedKey:0,excludedBeforeCutoff:0,excludedInvalidDate:0,reBrandCount:0,reDateCount:0,earliestRetailDate:null,latestRetailDate:null,detectedDateCol:'(none)',brandValues:[],rawDateSamples:[],rawKeySamples:[],sampleRetailDateValues:[],allRetailCols:[]}};
+  if(!raw.length)return{rows:[],diagnostics:{totalRows:0,reRows:0,uniqueIds:0,
+    excludedEligibility:0,excludedKey:0,excludedMonth:0,
+    eligibilityColFound:false,orderIdColFound:false,retailMonthColFound:false,
+    includedModelValues:[],allRetailCols:[],rawKeySamples:[],eligibilityValues:[]},maxRetailDate:null};
   const keyMap={};
   Object.keys(raw[0]).forEach(rk=>{keyMap[rk.toLowerCase().replace(/\s+/g,' ').trim()]=rk;});
   const allRetailCols=Object.keys(raw[0]);
-  // Detect retail attribution date column
-  const RETAIL_DATE_ALIASES=['retail_attribution_date','retailattributiondate','attribution date','attribution_date',
-    'retail date','retaildate','retail_date','attributiondate','date'];
-  let retailDateColKey=null;
-  for(const alias of RETAIL_DATE_ALIASES){if(keyMap[alias]){retailDateColKey=keyMap[alias];break;}}
-  if(!retailDateColKey){
-    // Broad scan — try columns whose names contain 'attribution','retail date','date'
-    for(const [k,rk] of Object.entries(keyMap)){
-      if(k.includes('attribution')||(k.includes('retail')&&k.includes('date'))||k==='date'){
-        // Try first 5 rows for a parseable date
-        for(let ri=0;ri<Math.min(raw.length,5);ri++){
-          if(parseAtherDate(String(raw[ri][rk]||'').trim())){retailDateColKey=rk;break;}
-        }
-        if(retailDateColKey)break;
-      }
-    }
-  }
-  // Detect brand/process column
-  const BRAND_ALIASES=['process','brand','oem','manufacturer','oem brand','brand name'];
-  let brandColKey=null;
-  for(const alias of BRAND_ALIASES){if(keyMap[alias]){brandColKey=keyMap[alias];break;}}
-  // Collect sample date values (ALL rows regardless of brand, from detected date col)
-  const sampleRetailDateValues=[];
-  if(retailDateColKey){
-    for(let i=0;i<Math.min(raw.length,50)&&sampleRetailDateValues.length<10;i++){
-      const v=String(raw[i][retailDateColKey]||'').trim();
-      if(v){const pd=parseAtherDate(v);sampleRetailDateValues.push({raw:v,parsed:pd?formatRetailDate(pd):null});}
-    }
-  }
   function get(r,keys){
     for(const k of(Array.isArray(keys)?keys:[keys])){
       const kl=k.toLowerCase().replace(/\s+/g,' ').trim();
@@ -660,70 +634,63 @@ function parseAtherRetailRows(raw){
     }
     return'';
   }
+  // Detect Payment Eligibility column
+  const ELIG_ALIASES=['payment eligibility','paymenteligibility','payment_eligibility','eligibility','payment eligible'];
+  let eligColKey=null;
+  for(const a of ELIG_ALIASES){if(keyMap[a]){eligColKey=keyMap[a];break;}}
+  // Detect Order ID column (join key to leads)
+  const KEY_ALIASES=['order id','orderid','order_id','sourcelead id','sourcelead_id',
+    'source lead id','source_lead_id','sourceleadid','lead id','leadid','optyid','opty id','opty_id'];
+  let orderIdColKey=null;
+  for(const a of KEY_ALIASES){if(keyMap[a]){orderIdColKey=keyMap[a];break;}}
+  // Detect retail date column (optional)
+  const DATE_ALIASES=['retail_attribution_date','retailattributiondate','attribution date',
+    'attribution_date','retail date','retaildate','retail_date','date','retail attribution date'];
+  let retailDateColKey=null;
+  for(const a of DATE_ALIASES){if(keyMap[a]){retailDateColKey=keyMap[a];break;}}
+  // Collect sample eligibility values for diagnostics
+  const eligValMap=new Map();
   const rows=[];
+  let excludedEligibility=0,excludedKey=0,excludedMonth=0;
   let maxRetailDate=null;
-  let excludedBrand=0,excludedKey=0,excludedBeforeCutoff=0,excludedInvalidDate=0;
-  let reBrandCount=0,reDateCount=0;
-  let earliestRetailDate=null,latestRetailDate=null,latestDmsDate=null,latestCoDate=null;
-  const brandValMap=new Map();
-  const excludedBrandModelMap=new Map(); // raw model values from brand-excluded rows
-  const includedModelMap=new Map();      // raw purchasedModel values from included rows
-  const rawDateSamples=[]; // raw date strings from accepted rows
-  const rawKeySamples=[]; // sourceLeadId values from accepted rows
+  const rawKeySamples=[];
+  const includedModelMap=new Map();
   for(const r of raw){
-    const proc=brandColKey?String(r[brandColKey]||'').trim():get(r,['process','brand','oem','manufacturer','oem brand','brand name']);
-    const procLow=(proc||'').toLowerCase().trim();
-    // Track all brand values
-    brandValMap.set(proc||'(empty)',(brandValMap.get(proc||'(empty)')||0)+1);
-    // Accept rows where brand is empty, 'ather*', or 'hero*'
-    const isAcceptedBrand=!proc||procLow.startsWith('ather')||procLow.startsWith('hero');
-    if(!isAcceptedBrand){
-      excludedBrand++;
-      // Track model values from excluded rows for diagnostics
-      const excMdl=get(r,['retail model','retail_model','retailmodel','purchasedmodel','purchased model','model','vehicle model','model name','modelname']);
-      if(excMdl)excludedBrandModelMap.set(excMdl,(excludedBrandModelMap.get(excMdl)||0)+1);
-      continue;
-    }
-    reBrandCount++;
-    const sourceLeadId=get(r,['sourcelead id','sourcelead_id','source lead id','source_lead_id','sourceleadid','lead id','leadid','optyid','opty id','opty_id']);
-    const performanceMonth=normalizeAtherMonth(get(r,['performance month','performancemonth','performance_month','retail month','retailmonth','month']));
-    if(!sourceLeadId||!performanceMonth){excludedKey++;continue;}
-    // Capture sample keys and dates from accepted rows
+    // Track eligibility values
+    const elig=eligColKey?String(r[eligColKey]||'').trim():get(r,ELIG_ALIASES);
+    eligValMap.set(elig||'(empty)',(eligValMap.get(elig||'(empty)')||0)+1);
+    // Filter: Payment Eligibility must be "Eligible"
+    if(elig.toLowerCase()!=='eligible'){excludedEligibility++;continue;}
+    // Order ID (join key)
+    const sourceLeadId=orderIdColKey?String(r[orderIdColKey]||'').trim():get(r,KEY_ALIASES);
+    if(!sourceLeadId){excludedKey++;continue;}
+    // Retail Month
+    const performanceMonth=normalizeAtherMonth(get(r,['retail month','retailmonth','retail_month',
+      'performance month','performancemonth','performance_month','month']));
+    if(!performanceMonth||atherMonthOrder(performanceMonth)<CUTOFF_MONTH_ORDER_CLEAR){excludedMonth++;continue;}
     if(rawKeySamples.length<10)rawKeySamples.push(sourceLeadId);
-    const dateStr=retailDateColKey?String(r[retailDateColKey]||'').trim():get(r,['retail_attribution_date','retailattributiondate','attribution date','attribution_date','retail date','retaildate','retail_date','date']);
-    if(rawDateSamples.length<10&&dateStr)rawDateSamples.push({raw:dateStr,parsed:parseAtherDate(dateStr)?formatRetailDate(parseAtherDate(dateStr)):null});
-    // Retail_Attribution_Date is REQUIRED — null/unparseable = exclude
-    const retailDate=parseAtherDate(dateStr);
-    if(!retailDate||isNaN(retailDate.getTime())){excludedInvalidDate++;continue;}
-    reDateCount++;
-    if(retailDate<DATA_CUTOFF){excludedBeforeCutoff++;continue;}
-    if(!maxRetailDate||retailDate>maxRetailDate)maxRetailDate=retailDate;
-    if(!earliestRetailDate||retailDate<earliestRetailDate)earliestRetailDate=retailDate;
-    if(!latestRetailDate||retailDate>latestRetailDate)latestRetailDate=retailDate;
+    // Date (optional — don't exclude if missing)
+    const dateStr=retailDateColKey?String(r[retailDateColKey]||'').trim():get(r,DATE_ALIASES);
+    const retailDate=parseAtherDate(dateStr)||null;
+    if(retailDate&&retailDate>=(maxRetailDate||retailDate))maxRetailDate=retailDate;
     const ctRaw=get(r,['call type','calltype','call_type','call-type']);
-    const ctLow=ctRaw.toLowerCase();
+    const ctLow=(ctRaw||'').toLowerCase();
     const callType=ctLow.includes('dms')?'dms':ctLow.includes('call')?'co':'other';
-    if(callType==='dms'){if(!latestDmsDate||retailDate>latestDmsDate)latestDmsDate=retailDate;}
-    if(callType==='co'){if(!latestCoDate||retailDate>latestCoDate)latestCoDate=retailDate;}
-    // 'retail model' is the common Ather Retail Master column name; aliases cover Hero variants
-    const purchasedModel=get(r,['retail model','retail_model','retailmodel','purchasedmodel','purchased model','purchased_model','purchasedmodelname','purchased model name','model','model name','vehicle model','vehicle_model','product','product name','vehicle name','vehiclename','vehicle','model_name','productname']);
+    const purchasedModel=get(r,['retail model','retail_model','retailmodel','purchasedmodel',
+      'purchased model','purchased_model','purchasedmodelname','purchased model name',
+      'model','model name','vehicle model','vehicle_model','product','product name',
+      'vehicle name','vehiclename','vehicle','model_name','productname']);
     includedModelMap.set(purchasedModel||'(blank)',(includedModelMap.get(purchasedModel||'(blank)')||0)+1);
     rows.push({sourceLeadId,performanceMonth,callType,retailDate,purchasedModel});
   }
   const uniqueIds=new Set(rows.map(r=>r.sourceLeadId)).size;
-  const brandValues=[...brandValMap.entries()].sort((a,b)=>b[1]-a[1]).slice(0,20).map(([v,c])=>v+'('+c+')');
+  const eligibilityValues=[...eligValMap.entries()].sort((a,b)=>b[1]-a[1]).slice(0,20).map(([v,c])=>v+'('+c+')');
   const includedModelValues=[...includedModelMap.entries()].sort((a,b)=>b[1]-a[1]);
-  const excludedBrandModelValues=[...excludedBrandModelMap.entries()].sort((a,b)=>b[1]-a[1]).slice(0,20);
   return{rows,diagnostics:{
     totalRows:raw.length,reRows:rows.length,uniqueIds,
-    excludedBrand,excludedKey,excludedBeforeCutoff,excludedInvalidDate,
-    reBrandCount,reDateCount,
-    earliestRetailDate,latestRetailDate,latestDmsDate,latestCoDate,
-    detectedDateCol:retailDateColKey||'(not found)',
-    brandColKey:brandColKey||'(not found)',
-    brandValues,rawDateSamples,rawKeySamples,
-    sampleRetailDateValues,allRetailCols,
-    includedModelValues,excludedBrandModelValues
+    excludedEligibility,excludedKey,excludedMonth,
+    eligibilityColFound:!!eligColKey,orderIdColFound:!!orderIdColKey,retailMonthColFound:!!keyMap['retail month']||!!keyMap['retailmonth'],
+    eligibilityValues,includedModelValues,allRetailCols,rawKeySamples
   },maxRetailDate};
 }
 
@@ -766,12 +733,11 @@ function joinREData(leadResult,retailResult){
     leadExcludedBeforeCutoff:leadDiag.excludedBeforeCutoff,leadExcludedInvalidDate:leadDiag.excludedInvalidDate,
     leadEarliestDate:leadDiag.earliestDate,leadLatestDate:leadDiag.latestDate,
     retailTotalRows:retailDiag.totalRows,retailHeroRows:retailDiag.reRows,retailUniqueIds:retailDiag.uniqueIds,
-    retailExcludedBrand:retailDiag.excludedBrand,retailExcludedKey:retailDiag.excludedKey,
-    retailExcludedBeforeCutoff:retailDiag.excludedBeforeCutoff,retailExcludedInvalidDate:retailDiag.excludedInvalidDate,
-    retailREBrandCount:retailDiag.reBrandCount,retailREDateCount:retailDiag.reDateCount,
-    retailEarliestDate:retailDiag.earliestRetailDate,retailLatestDate:retailDiag.latestRetailDate,
-    retailLatestDmsDate:retailDiag.latestDmsDate,retailLatestCoDate:retailDiag.latestCoDate,
-    retailBrandValues:retailDiag.brandValues,retailRawDateSamples:retailDiag.rawDateSamples,
+    retailExcludedEligibility:retailDiag.excludedEligibility,retailExcludedKey:retailDiag.excludedKey,
+    retailExcludedMonth:retailDiag.excludedMonth,
+    retailEligibilityColFound:retailDiag.eligibilityColFound,retailOrderIdColFound:retailDiag.orderIdColFound,
+    retailMonthColFound:retailDiag.retailMonthColFound,
+    retailEligibilityValues:retailDiag.eligibilityValues,
     retailRawKeySamples:retailDiag.rawKeySamples,keyMatchSamples,
     retailKeyCount:retailKeySet.size,leadKeyCount:leadKeySet.size,
     matched,unmatched,multiRetail}};
@@ -822,8 +788,8 @@ function HeroDiagnostics({d}){
   const items=[
     {l:'Latest Lead',v:fmtD(d.leadLatestDate)},
     {l:'Latest Retail',v:fmtD(d.retailLatestDate)},
-    {l:'Latest DMS Retail',v:fmtD(d.retailLatestDmsDate)},
-    {l:'Latest Call Out Retail',v:fmtD(d.retailLatestCoDate)},
+    {l:'Latest DMS Retail',v:fmtD(d.retailLatestDate)},
+    {l:'Latest Call Out Retail',v:fmtD(d.retailLatestDate)},
   ];
   return ce('div',{className:'diag-bar'},
     ce('span',{style:{fontWeight:700,marginRight:12}},'Data Status:'),
@@ -3886,11 +3852,11 @@ function App({fbUser,role,presence,onSignOut,onAdminOpen}){
       diag.retailSampleDates=rd2.sampleRetailDateValues||[];
       diag.retailDateCol=rd2.detectedDateCol||'(not found)';
       diag.retailBrandCol=rd2.brandColKey||'(not found)';
-      diag.retailBrandValues=rd2.brandValues||[];
-      diag.retailREBrandCount=rd2.reBrandCount||0;
+      diag.retailEligibilityValues=rd2.brandValues||[];
+      diag.retailReRows=rd2.reBrandCount||0;
       diag.retailExcludedKey=rd2.excludedKey||0;
-      diag.retailRawDateSamples=rd2.rawDateSamples||[];
-      diag.retailREDateCount=rd2.reDateCount||0;
+      diag.retailRawKeySamples=rd2.rawDateSamples||[];
+      diag.retailReRows=rd2.reDateCount||0;
       setData({...payload, retailTillDate: retailResult.maxRetailDate});
       setDiagnostics(diag);
       setLastSynced(new Date());
