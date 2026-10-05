@@ -1788,6 +1788,7 @@ function MonthlyGrids({ title, months, renderAgg, srcGroups, dimLabel, expandedG
    ════════════════════════════════════════════════════════════════════ */
 const OverviewTab = React.memo(function OverviewTab({ data, filters, RT }) {
   const { maps, monthly, sm, cm, mxst, univ: univRaw, csm: csmRaw } = data;
+  const atherRetailByMonth = data.atherRetailByMonth || {};
   const csm = csmRaw || [];
   const univ = univRaw || [];
   const pmsm = data.pmsm || [];
@@ -1863,7 +1864,14 @@ const OverviewTab = React.memo(function OverviewTab({ data, filters, RT }) {
         }
       }
     }
-    return { l:gL,r:gR,l2r:gL>0?gR/gL*100:0, pL,pR,pL2r:pL>0?pR/pL*100:0, oL,oR,oL2r:oL>0?oR/oL*100:0, dL, coL };
+    // Direct retail count overrides join-derived count (exact match to sheet)
+    const allMForR=!filters.months||filters.months.size===0;
+    let directR=0;
+    for(const [m,cnt] of Object.entries(atherRetailByMonth)){
+      if(allMForR||filters.months.has(m))directR+=cnt;
+    }
+    const effR=directR>0?directR:gR;
+    return { l:gL,r:effR,l2r:gL>0?effR/gL*100:0, pL,pR,pL2r:pL>0?pR/pL*100:0, oL,oR,oL2r:oL>0?oR/oL*100:0, dL, coL };
   }, [sm, univ, cm, pmsm, pm_csm, maps, filters, paidGrp, orgGrp, hasCityFilter, getLR]);
 
   const trendData = useMemo(() => {
@@ -1917,9 +1925,16 @@ const OverviewTab = React.memo(function OverviewTab({ data, filters, RT }) {
         const cur = byMonth.get(m) || [0,0]; cur[1]+=r; byMonth.set(m, cur);
       }
     }
+    // Merge in months from atherRetailByMonth that have no in-scope leads
+    for(const [m,cnt] of Object.entries(atherRetailByMonth)){
+      if(!byMonth.has(m))byMonth.set(m,[0,0]);
+    }
     return [...byMonth.entries()]
       .sort((a,b) => monthOrder(a[0]) - monthOrder(b[0]))
-      .map(([m, v]) => ({ m, l: v[0], r: v[1], l2r: v[0]>0 ? v[1]/v[0]*100 : 0 }));
+      .map(([m, v]) => {
+        const r=atherRetailByMonth[m]!==undefined?atherRetailByMonth[m]:v[1];
+        return { m, l:v[0], r, l2r:v[0]>0?r/v[0]*100:0 };
+      });
   }, [monthly, univ, cm, pmsm, pm_csm, maps, filters, hasCityFilter, getLR]);
 
   const srcBreak = useMemo(() => {
@@ -3867,7 +3882,14 @@ function App({fbUser,role,presence,onSignOut,onAdminOpen}){
       diag.retailExcludedKey=rd2.excludedKey||0;
       diag.retailRawKeySamples=rd2.rawDateSamples||[];
       diag.retailReRows=rd2.reDateCount||0;
-      setData({...payload, retailTillDate: retailResult.maxRetailDate});
+      // Direct retail count from sheet: unique eligible Order IDs per Retail Month
+      const atherRetailByMonth={};
+      for(const rr of retailResult.rows){
+        const m=rr.performanceMonth;
+        atherRetailByMonth[m]=(atherRetailByMonth[m]||0)+1;
+      }
+      console.log('[ATHER RETAIL DIRECT] By month:',JSON.stringify(atherRetailByMonth));
+      setData({...payload, retailTillDate:retailResult.maxRetailDate, atherRetailByMonth});
       setDiagnostics(diag);
       setLastSynced(new Date());
       window.__atherJoined = joined;
