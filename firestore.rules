@@ -1,0 +1,48 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isAdmin() {
+      return request.auth != null &&
+        request.auth.token.email in [
+          'kunal.kaushal@girnarsoft.com'
+        ];
+    }
+
+    match /ather_users/{userId} {
+
+      // Any user can read their own doc
+      allow read: if request.auth != null && request.auth.uid == userId;
+      // Admin can read all user docs
+      allow read: if isAdmin();
+
+      // New user creates their own doc — viewer allowed for girnarsoft.com users
+      allow create: if request.auth != null
+        && request.auth.uid == userId
+        && request.resource.data.email == request.auth.token.email
+        && request.resource.data.role in ['pending', 'admin', 'viewer'];
+
+      // User can update own profile and send upgrade request
+      allow update: if request.auth != null
+        && request.auth.uid == userId
+        && request.resource.data.diff(resource.data).affectedKeys()
+             .hasOnly(['displayName', 'photoURL', 'upgradeRequest', 'upgradeRequestedAt']);
+
+      // girnarsoft.com users can self-upgrade from pending to viewer
+      allow update: if request.auth != null
+        && request.auth.uid == userId
+        && request.auth.token.email.matches('.*@girnarsoft\\.com')
+        && resource.data.role == 'pending'
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['role'])
+        && request.resource.data.role == 'viewer';
+
+      // Admin can update role and clear upgradeRequest on any doc
+      allow update: if isAdmin()
+        && request.resource.data.diff(resource.data).affectedKeys()
+             .hasOnly(['role', 'upgradeRequest']);
+
+      // Admin can delete users
+      allow delete: if isAdmin();
+    }
+  }
+}

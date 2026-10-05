@@ -4227,6 +4227,7 @@ function ensureUserDoc(user){
     var updates={};
     if(snap.data().email!==user.email)Object.assign(updates,{email:user.email,displayName:user.displayName||user.email,photoURL:user.photoURL||''});
     if(isAdmin&&snap.data().role!=='admin')updates.role='admin';
+    if(!isAdmin&&user.email.endsWith('@girnarsoft.com')&&snap.data().role==='pending')updates.role='viewer';
     if(Object.keys(updates).length)return ref.update(updates);
   });
 }
