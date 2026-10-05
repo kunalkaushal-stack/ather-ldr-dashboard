@@ -1320,6 +1320,21 @@ function DetailedCsvBtn({onClick}) {
   }, '\u2193 Detailed CSV');
 }
 
+function ViewerCsvGate(){
+  var[tip,setTip]=useState(false);
+  return ce('span',{style:{position:'relative',display:'inline-block',marginLeft:6}},
+    ce('button',{
+      onClick:function(){setTip(function(v){return !v;});},
+      title:'Download requires upgrade',
+      style:{padding:'5px 10px',fontSize:10,fontWeight:700,border:'1px solid #e2e8f0',borderRadius:6,background:'#f8fafc',color:'#94a3b8',cursor:'pointer',whiteSpace:'nowrap',fontFamily:'inherit'}
+    },'\uD83D\uDD12 CSV'),
+    tip&&ce('div',{
+      onClick:function(){setTip(false);},
+      style:{position:'absolute',right:0,top:'110%',background:'#1e293b',color:'#f1f5f9',borderRadius:8,padding:'10px 14px',fontSize:11,whiteSpace:'nowrap',zIndex:9999,boxShadow:'0 4px 20px rgba(0,0,0,.3)',lineHeight:1.7,cursor:'default'}
+    },'Downloads require Full access.',ce('br',null),'Use \u201cRequest Upgrade\u201d in the top bar.')
+  );
+}
+
 function isRetailedLead(r) {
   if (!r.isBooked || !r.booking_month || !r.lead_month) return false;
   const d = atherMonthOrder(r.booking_month) - atherMonthOrder(r.lead_month);
@@ -1770,8 +1785,8 @@ function MonthlyGrids({ title, months, renderAgg, srcGroups, dimLabel, expandedG
       ce('div', { style:{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:10} },
         ce('div', { className:'section-title', style:{marginBottom:0} }, '∑ All Months — Summary'),
         ce('div',{style:{display:'flex',gap:0}},
-          !noExport && ce(CsvBtn, { onClick:()=>makeAggCsv(summaryAgg, dimLabel, (title||dimLabel).replace(/[^a-z0-9]/gi,'_')+'_AllMonths.csv') }),
-          !noExport && onDetailedCsv && ce(DetailedCsvBtn, { onClick:()=>onDetailedCsv((title||dimLabel).replace(/\s/g,'_'), null) })
+          viewerMode ? ce(ViewerCsvGate,null) : (!noExport && ce(CsvBtn, { onClick:()=>makeAggCsv(summaryAgg, dimLabel, (title||dimLabel).replace(/[^a-z0-9]/gi,'_')+'_AllMonths.csv') })),
+          !viewerMode && !noExport && onDetailedCsv && ce(DetailedCsvBtn, { onClick:()=>onDetailedCsv((title||dimLabel).replace(/\s/g,'_'), null) })
         )
       ),
       ce(DimGrid, { agg:summaryAgg, srcGroups, dimLabel, expandedGrps, onToggleGrp, expandedRows, onToggleRow, subRowsFn, viewerMode, noGroupHeaders })
@@ -1782,8 +1797,8 @@ function MonthlyGrids({ title, months, renderAgg, srcGroups, dimLabel, expandedG
         ce('div', { style:{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:10} },
           ce('div', { className:'section-title', style:{marginBottom:0} }, noPrefix ? M : (title || dimLabel) + ' — ' + M),
           ce('div',{style:{display:'flex',gap:0}},
-            !noExport && ce(CsvBtn, { onClick:()=>makeAggCsv(agg, dimLabel, (title||dimLabel).replace(/[^a-z0-9]/gi,'_')+'_'+M.replace(/[^a-z0-9]/gi,'_')+'.csv') }),
-            !noExport && onDetailedCsv && ce(DetailedCsvBtn, { onClick:()=>onDetailedCsv((title||dimLabel).replace(/\s/g,'_'), M) })
+            viewerMode ? ce(ViewerCsvGate,null) : (!noExport && ce(CsvBtn, { onClick:()=>makeAggCsv(agg, dimLabel, (title||dimLabel).replace(/[^a-z0-9]/gi,'_')+'_'+M.replace(/[^a-z0-9]/gi,'_')+'.csv') })),
+            !viewerMode && !noExport && onDetailedCsv && ce(DetailedCsvBtn, { onClick:()=>onDetailedCsv((title||dimLabel).replace(/\s/g,'_'), M) })
           )
         ),
         ce(DimGrid, { agg, srcGroups, dimLabel, expandedGrps, onToggleGrp, expandedRows, onToggleRow, subRowsFn, viewerMode, noGroupHeaders })
@@ -2298,7 +2313,7 @@ const OverviewTab = React.memo(function OverviewTab({ data, filters, RT }) {
    SOURCE ANALYSIS TAB
    ════════════════════════════════════════════════════════════════════ */
 const ENQUIRY_STATUS = 'L1 Verified (Callback Scheduled)';
-const SourceTab = React.memo(function SourceTab({ data, rawData, filters, months, RT, onDetailedCsv, nsRetailRows, rawJoined }) {
+const SourceTab = React.memo(function SourceTab({ data, rawData, filters, months, RT, onDetailedCsv, nsRetailRows, rawJoined, viewerMode }) {
   const { maps, sm, univ: univRaw, csm: csmRaw } = data;
   const univ = univRaw || [];
   const csm  = csmRaw  || [];
@@ -2448,13 +2463,13 @@ const SourceTab = React.memo(function SourceTab({ data, rawData, filters, months
       ce('div', { style:{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:10} },
         ce('div', { className:'section-title', style:{marginBottom:0} }, M),
         ce('div',{style:{display:'flex',gap:0}},
-          ce(CsvBtn, { onClick:()=>{
+          viewerMode ? ce(ViewerCsvGate,null) : ce(CsvBtn, { onClick:()=>{
             const aoa=[['Source','Leads','Enquiries','Retail','L.Contrib%','L2R%','Non-Scope R']];
             csvSorted.forEach(([src,[l,r]])=>{const tot=fin(l,r);aoa.push([src,tot.l,enqBySrc.get(src)||0,tot.r,gL>0?+(tot.l/gL*100).toFixed(1):0,+tot.l2r.toFixed(1),nrBySrc.get(src)||0]);});
             aoa.push(['Grand Total',gL,gEnq,gR,100,gL>0?+(gR/gL*100).toFixed(1):0,gNR]);
             exportCsv(aoa,'RE_Source_'+M.replace(/[^a-z0-9]/gi,'_')+'.csv');
           }}),
-          onDetailedCsv && ce(DetailedCsvBtn, { onClick:()=>onDetailedCsv('Source', M) })
+          !viewerMode && onDetailedCsv && ce(DetailedCsvBtn, { onClick:()=>onDetailedCsv('Source', M) })
         )
       ),
       ce('div', { className:'scroll-x' },
@@ -2633,13 +2648,13 @@ const SourceTab = React.memo(function SourceTab({ data, rawData, filters, months
       ce('div', { style:{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:10} },
         ce('div', { className:'section-title', style:{marginBottom:0} }, '∑ All Months — Source Summary'),
         ce('div',{style:{display:'flex',gap:0}},
-          ce(CsvBtn, { onClick:()=>{
+          viewerMode ? ce(ViewerCsvGate,null) : ce(CsvBtn, { onClick:()=>{
             const aoa=[['Source','Leads','Enquiries','Retail','L.Contrib%','L2R%','Non-Scope R']];
             crossMonthTotals.sorted.forEach(([src,[l,r]])=>{const tot=fin(l,r);aoa.push([src,tot.l,crossMonthTotals.enqBySrc.get(src)||0,tot.r,crossMonthTotals.l>0?+(tot.l/crossMonthTotals.l*100).toFixed(1):0,+tot.l2r.toFixed(1),crossMonthTotals.nrBySrc.get(src)||0]);});
             aoa.push(['Grand Total',crossMonthTotals.l,crossMonthTotals.gEnq,crossMonthTotals.r,100,+crossMonthTotals.l2r.toFixed(1),crossMonthTotals.gNR]);
             exportCsv(aoa,'RE_Source_AllMonths.csv');
           }}),
-          onDetailedCsv && ce(DetailedCsvBtn, { onClick:()=>onDetailedCsv('Source', null) })
+          !viewerMode && onDetailedCsv && ce(DetailedCsvBtn, { onClick:()=>onDetailedCsv('Source', null) })
         )
       ),
       ce('div', { className:'scroll-x' },
@@ -2686,7 +2701,7 @@ const SourceTab = React.memo(function SourceTab({ data, rawData, filters, months
 /* ════════════════════════════════════════════════════════════════════
    WEB ID TAB  (Direct Push / L1 Nurtured dimension)
    ════════════════════════════════════════════════════════════════════ */
-const PivotTab = React.memo(function PivotTab({ data, filters, months, RT, onDetailedCsv, rawJoined, leadsMode }) {
+const PivotTab = React.memo(function PivotTab({ data, filters, months, RT, onDetailedCsv, rawJoined, leadsMode, viewerMode }) {
   const { maps } = data;
   const COL_SEP = '\x00';
 
@@ -3267,11 +3282,13 @@ const PivotTab = React.memo(function PivotTab({ data, filters, months, RT, onDet
 
       !unsupported && !noData && !awaitingPipeline &&
         ce('div', { style:{marginLeft:'auto',alignSelf:'flex-end',paddingTop:20,display:'flex',gap:6} },
-          onDetailedCsv && ce(DetailedCsvBtn, { onClick:()=>onDetailedCsv('Pivot', null) }),
-          ce('button', { onClick: handleExport,
-            style:{ padding:'7px 16px', fontSize:12, fontWeight:700, border:'none',
-                    borderRadius:8, background:'#0891B2', color:'#fff', cursor:'pointer' }
-          }, '↓ Export CSV')
+          !viewerMode && onDetailedCsv && ce(DetailedCsvBtn, { onClick:()=>onDetailedCsv('Pivot', null) }),
+          viewerMode
+            ? ce(ViewerCsvGate,null)
+            : ce('button', { onClick: handleExport,
+                style:{ padding:'7px 16px', fontSize:12, fontWeight:700, border:'none',
+                        borderRadius:8, background:'#0891B2', color:'#fff', cursor:'pointer' }
+              }, '↓ Export CSV')
         ),
     ),
 
@@ -4080,7 +4097,7 @@ function App({fbUser,role,presence,onSignOut,onAdminOpen}){
     // noSource: combined flag — hides source columns in DimGrid (viewer & client)
     // clientMode suppresses exports and DMS/Call Out in individual tabs
     const noSource=viewerMode||clientMode;
-    const clientDetailedCsv=clientMode?undefined:onDetailedCsv;
+    const clientDetailedCsv=(clientMode||viewerMode)?undefined:onDetailedCsv;
     const props={data:effectiveData,filters,months,RT,viewerMode:noSource,clientMode,onDetailedCsv:clientDetailedCsv};
     switch(tab){
       case 'overview':    return ce(OverviewTab,      props);
@@ -4302,6 +4319,32 @@ function PendingPage({user,onSignOut}){
   );
 }
 
+function ViewerUpgradeStrip({fbUser}){
+  var[sent,setSent]=useState(null);
+  var[err,setErr]=useState('');
+  useEffect(function(){
+    getFbDb().collection(USERS_COL).doc(fbUser.uid).get()
+      .then(function(d){setSent(!!(d.exists&&d.data()&&d.data().upgradeRequest));})
+      .catch(function(){setSent(false);});
+  },[fbUser.uid]);
+  function request(){
+    setSent('loading');
+    getFbDb().collection(USERS_COL).doc(fbUser.uid).update({upgradeRequest:true,upgradeRequestedAt:firebase.firestore.FieldValue.serverTimestamp()})
+      .then(function(){setSent(true);})
+      .catch(function(e){setErr(e.message);setSent(false);});
+  }
+  return ce('span',{style:{display:'inline-flex',alignItems:'center',gap:4,marginLeft:4}},
+    ce('span',{className:'viewer-badge'},'Viewer'),
+    sent===true
+      ?ce('span',{style:{fontSize:10,color:'#86efac',fontWeight:700,marginLeft:2}},'\u2713 Requested')
+      :ce('button',{
+          onClick:request,disabled:sent==='loading',
+          title:'Request full access from admin',
+          style:{fontSize:10,padding:'2px 8px',borderRadius:6,border:'1px solid rgba(255,255,255,.4)',background:'rgba(255,255,255,.15)',color:'#fff',cursor:'pointer',fontWeight:600,fontFamily:'inherit',whiteSpace:'nowrap'}
+        },sent==='loading'?'Sending\u2026':'Request Upgrade')
+  );
+}
+
 function PresenceStrip({presence,fbUser,role,onSignOut,onAdminOpen}){
   var pArr=Object.values(presence||{});
   var others=pArr.filter(function(p){return p.uid!==fbUser.uid;});
@@ -4323,7 +4366,7 @@ function PresenceStrip({presence,fbUser,role,onSignOut,onAdminOpen}){
     ),
     Av(selfPres,true),
     (role==='admin'||role==='full')&&ce('span',{className:'viewer-badge',style:{background:'rgba(255,255,255,.15)',color:'#A5F3FC',borderRadius:20,padding:'2px 8px',fontSize:9,fontWeight:700,letterSpacing:'.06em',textTransform:'uppercase',marginLeft:4}},role==='admin'?'Admin':'Full'),
-    role==='viewer'&&ce('span',{className:'viewer-badge',style:{marginLeft:4}},'Viewer'),
+    role==='viewer'&&ce(ViewerUpgradeStrip,{fbUser:fbUser}),
     role==='client'&&ce('span',{className:'viewer-badge',style:{background:'#ccfbf1',color:'#0d9488',marginLeft:4}},'Client'),
     role==='admin'&&ce('button',{
       style:{marginLeft:6,padding:'4px 10px',borderRadius:6,border:'1px solid rgba(255,255,255,.3)',background:'rgba(255,255,255,.12)',fontSize:11,cursor:'pointer',color:'#fff',fontWeight:600,fontFamily:'inherit',whiteSpace:'nowrap'},
