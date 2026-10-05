@@ -2409,6 +2409,9 @@ const SourceTab = React.memo(function SourceTab({ data, rawData, filters, months
         const c = bySrc.get(src)||[0,0]; c[1]+=r; bySrc.set(src,c);
       }
     }
+    // Override gR with direct count from retail sheet (no join dependency)
+    const _arbmM=(data.atherRetailByMonth||{})[M];
+    if(_arbmM!==undefined)gR=_arbmM;
     // Pass 3: Non-Scope Retail (NR) — iterate nsRetailRows, filter by invoiceMonth + active filters
     const nsRows = nsRetailRows || [];
     const nrBySrc = new Map();
@@ -2505,7 +2508,7 @@ const SourceTab = React.memo(function SourceTab({ data, rawData, filters, months
         )
       )
     );
-  }, [sm, csm, univ, pmsm, pm_csm, smLead, univLead, csmLead, maps, filters, getLR, hasCityF, nsRetailRows, rawJoined]);
+  }, [sm, csm, univ, pmsm, pm_csm, smLead, univLead, csmLead, maps, filters, getLR, hasCityF, nsRetailRows, rawJoined, data.atherRetailByMonth]);
 
   const crossMonthTotals = useMemo(() => {
     const allS = !filters.sources || filters.sources.size === 0;
@@ -2593,6 +2596,11 @@ const SourceTab = React.memo(function SourceTab({ data, rawData, filters, months
         const c=bySrc.get(src)||[0,0]; c[1]+=r; bySrc.set(src,c);
       }
     }
+    // Override gR with direct count from retail sheet for selected months
+    const _arbm=data.atherRetailByMonth||{};
+    let _crossR=0;
+    for(const _m of mSet){if(_arbm[_m]!==undefined)_crossR+=_arbm[_m];}
+    if(_crossR>0)gR=_crossR;
     // Pass 3 (cross-month): Non-Scope Retail
     const nsRows2 = nsRetailRows || [];
     const nrBySrc2 = new Map();
@@ -2632,7 +2640,7 @@ const SourceTab = React.memo(function SourceTab({ data, rawData, filters, months
     }
     const sorted = [...bySrc.entries()].sort((a,b)=>b[1][0]-a[1][0]);
     return { l:gL, r:gR, l2r:gL>0?gR/gL*100:0, sorted, nrBySrc:nrBySrc2, gNR:gNR2, enqBySrc:enqBySrc2, gEnq:gEnq2 };
-  }, [sm, csm, univ, pmsm, pm_csm, smLead, univLead, csmLead, maps, filters, getLR, hasCityF, months, nsRetailRows, rawJoined]);
+  }, [sm, csm, univ, pmsm, pm_csm, smLead, univLead, csmLead, maps, filters, getLR, hasCityF, months, nsRetailRows, rawJoined, data.atherRetailByMonth]);
 
   return ce('div', {className:'fade-up'},
     crossMonthTotals.l > 0 && ce('div', { className:'card', style:{padding:'16px 18px',marginBottom:14,borderTop:'3px solid #003087'} },
