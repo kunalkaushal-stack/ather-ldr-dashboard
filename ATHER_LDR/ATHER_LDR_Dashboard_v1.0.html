@@ -4222,7 +4222,7 @@ function ensureUserDoc(user){
   return ref.get().then(function(snap){
     if(!snap.exists){
       return ref.set({email:user.email,displayName:user.displayName||user.email,photoURL:user.photoURL||'',
-        role:isAdmin?'admin':'pending',createdAt:firebase.firestore.FieldValue.serverTimestamp()});
+        role:isAdmin?'admin':(user.email.endsWith('@girnarsoft.com')?'viewer':'pending'),createdAt:firebase.firestore.FieldValue.serverTimestamp()});
     }
     var updates={};
     if(snap.data().email!==user.email)Object.assign(updates,{email:user.email,displayName:user.displayName||user.email,photoURL:user.photoURL||''});
@@ -4269,13 +4269,34 @@ function LoginPage({onLogin,loading,error}){
 }
 
 function PendingPage({user,onSignOut}){
+  var[reqSent,setReqSent]=useState(null);
+  var[reqErr,setReqErr]=useState('');
+  useEffect(function(){
+    getFbDb().collection(USERS_COL).doc(user.uid).get()
+      .then(function(d){setReqSent(!!(d.exists&&d.data()&&d.data().upgradeRequest));})
+      .catch(function(){setReqSent(false);});
+  },[user.uid]);
+  function requestUpgrade(){
+    setReqSent('loading');
+    getFbDb().collection(USERS_COL).doc(user.uid).update({upgradeRequest:true,upgradeRequestedAt:firebase.firestore.FieldValue.serverTimestamp()})
+      .then(function(){setReqSent(true);})
+      .catch(function(e){setReqErr(e.message);setReqSent(false);});
+  }
   return ce('div',{className:'auth-screen'},
     ce('div',{className:'auth-card'},
       ce('div',{style:{fontSize:40,marginBottom:12,lineHeight:1}},'\u23f3'),
       ce('h2',{style:{fontSize:18,fontWeight:700,color:'#111827',margin:'0 0 8px'}},'Access Pending'),
-      ce('p',{style:{fontSize:13,color:'#6b7280',margin:'0 0 4px',lineHeight:1.5}},user.email+' is pending role assignment.'),
-      ce('p',{style:{fontSize:12,color:'#9ca3af',margin:'0 0 24px'}},'Contact kunal.kaushal@girnarsoft.com to request access.'),
-      ce('button',{onClick:onSignOut,style:{padding:'9px 22px',borderRadius:8,border:'1px solid #d1d5db',background:'#fff',fontSize:13,cursor:'pointer',color:'#374151',fontWeight:600,fontFamily:'inherit'}},'Sign Out')
+      ce('p',{style:{fontSize:13,color:'#6b7280',margin:'0 0 8px',lineHeight:1.5}},user.email+' is pending role assignment.'),
+      reqSent===true
+        ?ce('div',{style:{background:'#f0fdf4',border:'1px solid #86efac',borderRadius:8,padding:'10px 14px',fontSize:12,color:'#15803d',margin:'0 0 16px'}},'\u2713 Upgrade request sent \u2014 admin will review shortly.')
+        :ce('div',null,
+          ce('p',{style:{fontSize:12,color:'#9ca3af',margin:'0 0 12px'}},'You can request an upgrade or contact kunal.kaushal@girnarsoft.com.'),
+          reqSent===false&&ce('button',{onClick:requestUpgrade,style:{display:'block',width:'100%',padding:'9px 22px',borderRadius:8,border:'none',background:'#2563eb',color:'#fff',fontSize:13,cursor:'pointer',fontWeight:600,fontFamily:'inherit',marginBottom:8}},'Request Access Upgrade'),
+          reqSent==='loading'&&ce('span',{style:{fontSize:12,color:'#9ca3af'}},'Sending request\u2026'),
+          reqSent===null&&ce('span',{style:{fontSize:12,color:'#9ca3af'}},'Checking status\u2026')
+        ),
+      reqErr&&ce('p',{style:{color:'#dc2626',fontSize:11,margin:'0 0 8px'}},reqErr),
+      ce('button',{onClick:onSignOut,style:{display:'block',width:'100%',padding:'9px 22px',borderRadius:8,border:'1px solid #d1d5db',background:'#fff',fontSize:13,cursor:'pointer',color:'#374151',fontWeight:600,fontFamily:'inherit'}},'Sign Out')
     )
   );
 }
@@ -4324,17 +4345,30 @@ function AdminPanel({onClose}){
     return unsub;
   },[]);
   function changeRole(uid,newRole){
-    setSaving(uid);
-    getFbDb().collection(USERS_COL).doc(uid).update({role:newRole})
+    setSaving(uid+'-role');
+    var updates={role:newRole};
+    if(newRole!=='pending')updates.upgradeRequest=firebase.firestore.FieldValue.delete();
+    getFbDb().collection(USERS_COL).doc(uid).update(updates)
+      .then(function(){setSaving(null);})
+      .catch(function(e){setPanelErr(e.message);setSaving(null);});
+  }
+  function deleteUser(uid){
+    if(!confirm('Delete this user? They will need to sign in again to regain access.'))return;
+    setSaving(uid+'-del');
+    getFbDb().collection(USERS_COL).doc(uid).delete()
       .then(function(){setSaving(null);})
       .catch(function(e){setPanelErr(e.message);setSaving(null);});
   }
   var roleColor={admin:'#92400e',full:'#15803d',viewer:'#1d4ed8',pending:'#6b7280',client:'#0d9488'};
-  var roleBg={admin:'#fef3c7',full:'#cffafe',viewer:'#dbeafe',pending:'#f3f4f6',client:'#ccfbf1'};
+  var roleBg={admin:'#fef3c7',full:'#d1fae5',viewer:'#dbeafe',pending:'#f3f4f6',client:'#ccfbf1'};
+  var reqCount=users.filter(function(u){return u.upgradeRequest;}).length;
   return ce('div',{className:'admin-panel-overlay',onClick:function(e){if(e.target===e.currentTarget)onClose();}},
     ce('div',{className:'admin-card'},
       ce('div',{style:{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:12}},
-        ce('span',{style:{fontSize:15,fontWeight:700,color:'#111827'}},'\ud83d\udc65 User Access Management'),
+        ce('span',{style:{fontSize:15,fontWeight:700,color:'#111827',display:'flex',alignItems:'center',gap:8}},
+          '\ud83d\udc65 User Access Management',
+          reqCount>0&&ce('span',{style:{background:'#dc2626',color:'#fff',borderRadius:20,fontSize:11,fontWeight:700,padding:'2px 8px'}},reqCount+' request'+(reqCount>1?'s':''))
+        ),
         ce('button',{style:{background:'none',border:'none',fontSize:22,cursor:'pointer',color:'#9ca3af',lineHeight:1},onClick:onClose},'\u00d7')
       ),
       ce('p',{style:{fontSize:11,color:'#6b7280',margin:'0 0 14px',lineHeight:1.7}},
@@ -4346,30 +4380,43 @@ function AdminPanel({onClose}){
       ),
       panelErr&&ce('div',{style:{background:'#fef2f2',color:'#dc2626',padding:'8px 12px',borderRadius:8,fontSize:12,marginBottom:12}},panelErr),
       ce('div',{style:{overflowX:'auto'}},
-        ce('table',{style:{width:'100%',borderCollapse:'collapse',fontSize:12,minWidth:480}},
+        ce('table',{style:{width:'100%',borderCollapse:'collapse',fontSize:12,minWidth:560}},
           ce('thead',null,ce('tr',{style:{background:'#fff7ed'}},
-            ['Email','Name','Role','Change To'].map(function(h,i){
+            ['Email','Name','Role','Change To',''].map(function(h,i){
               return ce('th',{key:i,style:{padding:'8px 10px',textAlign:'left',fontWeight:700,color:'#164E63',fontSize:11,borderBottom:'2px solid #FDBA74'}},h);
             })
           )),
           ce('tbody',null,users.map(function(u){
-            return ce('tr',{key:u.id,style:{borderBottom:'1px solid #ECFEFF'}},
-              ce('td',{style:{padding:'7px 10px',color:'#6b7280',fontSize:11,maxWidth:220,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}},u.email),
+            var hasReq=!!u.upgradeRequest;
+            return ce('tr',{key:u.id,style:{borderBottom:'1px solid #ECFEFF',background:hasReq?'#fffbeb':undefined}},
+              ce('td',{style:{padding:'7px 10px',fontSize:11,maxWidth:200,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}},
+                hasReq&&ce('span',{style:{display:'inline-block',width:7,height:7,borderRadius:'50%',background:'#f59e0b',marginRight:5,verticalAlign:'middle'}}),
+                ce('span',{style:{color:'#6b7280'}},u.email)
+              ),
               ce('td',{style:{padding:'7px 10px',color:'#374151',fontSize:11}},u.displayName||'\u2014'),
               ce('td',{style:{padding:'7px 10px'}},
-                ce('span',{style:{padding:'2px 8px',borderRadius:20,fontSize:10,fontWeight:700,background:roleBg[u.role]||roleBg.pending,color:roleColor[u.role]||roleColor.pending}},u.role||'pending')
+                ce('span',{style:{padding:'2px 8px',borderRadius:20,fontSize:10,fontWeight:700,background:roleBg[u.role]||roleBg.pending,color:roleColor[u.role]||roleColor.pending}},u.role||'pending'),
+                hasReq&&ce('span',{style:{fontSize:10,color:'#d97706',marginLeft:5,fontStyle:'italic'}},'\u2191 upgrade req')
               ),
               ce('td',{style:{padding:'7px 10px'}},
                 isAdminEmail(u.email)
                   ?ce('span',{style:{fontSize:11,color:'#9ca3af'}},'\u2014')
-                  :saving===u.id
+                  :saving===u.id+'-role'
                     ?ce('span',{style:{fontSize:11,color:'#9ca3af'}},'Saving\u2026')
-                    :ce('select',{value:u.role||'pending',onChange:function(e){changeRole(u.id,e.target.value);},
+                    :ce('select',{value:u.role||'viewer',onChange:function(e){changeRole(u.id,e.target.value);},
                         style:{fontSize:11,padding:'3px 8px',borderRadius:6,border:'1px solid #d1d5db',cursor:'pointer',background:'#fff',fontFamily:'inherit'}},
                       ['pending','viewer','full','admin','client'].map(function(r){
                         return ce('option',{key:r,value:r},r.charAt(0).toUpperCase()+r.slice(1));
                       })
                     )
+              ),
+              ce('td',{style:{padding:'7px 10px',textAlign:'right',whiteSpace:'nowrap'}},
+                isAdminEmail(u.email)
+                  ?ce('span',{style:{fontSize:11,color:'#9ca3af'}},'\u2014')
+                  :saving===u.id+'-del'
+                    ?ce('span',{style:{fontSize:11,color:'#9ca3af'}},'Deleting\u2026')
+                    :ce('button',{onClick:function(){deleteUser(u.id);},
+                        style:{fontSize:11,padding:'3px 8px',borderRadius:6,border:'1px solid #fca5a5',background:'#fef2f2',color:'#dc2626',cursor:'pointer',fontWeight:600,fontFamily:'inherit'}},'Delete')
               )
             );
           }))
@@ -4378,7 +4425,6 @@ function AdminPanel({onClose}){
     )
   );
 }
-
 function AuthGate(){
   var[authState,setAuthState]=useState('loading');
   var[fbUser,setFbUser]=useState(null);
