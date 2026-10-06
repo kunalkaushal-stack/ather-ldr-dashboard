@@ -567,9 +567,9 @@ function parseAtherLeadRows(raw){
     // The auto-detected date column (leadDateColKey) is used ONLY to populate leadDate for
     // day-level Dispersion (BDM) calculations — it does NOT determine lead_month.
     const lmo=atherMonthOrder(lead_month);
-    const mayOrd=atherMonthOrder("May'2026");
+    const leadParseFloor=atherMonthOrder("Jan'2025"); // include leads from Jan'25 for On Update join
     if(lmo===0){excludedInvalidDate++;continue;} // unparseable month
-    if(lmo<mayOrd){excludedBeforeCutoff++;continue;} // before May'2026 → exclude
+    if(lmo<leadParseFloor){excludedBeforeCutoff++;continue;} // before Jan'2025 → exclude
     const dup=get(r,['duplicate check','duplicity check','duplicate','is duplicate','isdup','is_duplicate']);
     const isUnique=dup?dup.toLowerCase()==='unique':true;
     // Skip cross-month duplicate opty_ids — only 'Unique' rows enter analysis
@@ -895,32 +895,38 @@ function buildPayload(joinedRows){
     const L=1,R=isRetailed(r)?1:0;
     const Rd=(R&&r.callType==='dms')?1:0;
     const Rc=(R&&r.callType==='co')?1:0;
+    // showOnCreate: only include in On Create (lead_month) matrices if lead was created >= May'26
+    // Historical leads (Jan'25–Apr'26) appear only in On Update (booking_month) view
+    const r_lmo=atherMonthOrder(r.lead_month||'');
+    const showOnCreate=r_lmo===0||r_lmo>=CUTOFF_MONTH_ORDER_CLEAR;
 
-    // On Create (lead_month dimension)
-    a4(monthlyA,li+'',L,R,Rd,Rc);
-    a4(smA,si+'|'+li,L,R,Rd,Rc);
-    a4(mmA,mi+'|'+si+'|'+li,L,R,Rd,Rc);
-    a4(stmA,sti+'|'+si+'|'+li,L,R,Rd,Rc);
-    a4(ltmA,lti+'|'+si+'|'+li,L,R,Rd,Rc);
-    a4(mxstA,mi+'|'+sti+'|'+li,L,R,Rd,Rc);
-    a4(cmA,ci+'|'+li,L,R,Rd,Rc);
-    a4(csmA,ci+'|'+si+'|'+li,L,R,Rd,Rc);
-    a4(cxmA,ci+'|'+mi+'|'+li,L,R,Rd,Rc);
-    a4(univA,mi+'|'+si+'|'+sti+'|'+lti+'|'+li,L,R,Rd,Rc);
-    if(r.isUnique){
-      a4(u_mA,li+'',L,R,Rd,Rc);
-      a4(u_smA,si+'|'+li,L,R,Rd,Rc);
-      a4(u_mmA,mi+'|'+si+'|'+li,L,R,Rd,Rc);
-      a4(u_stmA,sti+'|'+si+'|'+li,L,R,Rd,Rc);
-      a4(u_ltmA,lti+'|'+si+'|'+li,L,R,Rd,Rc);
-      a4(u_mxstA,mi+'|'+sti+'|'+li,L,R,Rd,Rc);
-      a4(u_cmA,ci+'|'+li,L,R,Rd,Rc);
-      a4(u_csmA,ci+'|'+si+'|'+li,L,R,Rd,Rc);
-      a4(u_cxmA,ci+'|'+mi+'|'+li,L,R,Rd,Rc);
-      a4(u_univA,mi+'|'+si+'|'+sti+'|'+lti+'|'+li,L,R,Rd,Rc);
+    // On Create (lead_month dimension) — only for May'26+ leads
+    if(showOnCreate){
+      a4(monthlyA,li+'',L,R,Rd,Rc);
+      a4(smA,si+'|'+li,L,R,Rd,Rc);
+      a4(mmA,mi+'|'+si+'|'+li,L,R,Rd,Rc);
+      a4(stmA,sti+'|'+si+'|'+li,L,R,Rd,Rc);
+      a4(ltmA,lti+'|'+si+'|'+li,L,R,Rd,Rc);
+      a4(mxstA,mi+'|'+sti+'|'+li,L,R,Rd,Rc);
+      a4(cmA,ci+'|'+li,L,R,Rd,Rc);
+      a4(csmA,ci+'|'+si+'|'+li,L,R,Rd,Rc);
+      a4(cxmA,ci+'|'+mi+'|'+li,L,R,Rd,Rc);
+      a4(univA,mi+'|'+si+'|'+sti+'|'+lti+'|'+li,L,R,Rd,Rc);
+      if(r.isUnique){
+        a4(u_mA,li+'',L,R,Rd,Rc);
+        a4(u_smA,si+'|'+li,L,R,Rd,Rc);
+        a4(u_mmA,mi+'|'+si+'|'+li,L,R,Rd,Rc);
+        a4(u_stmA,sti+'|'+si+'|'+li,L,R,Rd,Rc);
+        a4(u_ltmA,lti+'|'+si+'|'+li,L,R,Rd,Rc);
+        a4(u_mxstA,mi+'|'+sti+'|'+li,L,R,Rd,Rc);
+        a4(u_cmA,ci+'|'+li,L,R,Rd,Rc);
+        a4(u_csmA,ci+'|'+si+'|'+li,L,R,Rd,Rc);
+        a4(u_cxmA,ci+'|'+mi+'|'+li,L,R,Rd,Rc);
+        a4(u_univA,mi+'|'+si+'|'+sti+'|'+lti+'|'+li,L,R,Rd,Rc);
+      }
     }
 
-    // On Update (booking_month for booked leads, lead_month for unbooked)
+    // On Update (booking_month for booked leads, lead_month for unbooked) — all leads
     const bmi=(r.isBooked&&r.booking_month)?lmMap[r.booking_month]:li;
     a4(bm_mA,bmi+'',L,R,Rd,Rc);
     a4(bm_smA,si+'|'+bmi,L,R,Rd,Rc);
@@ -934,15 +940,17 @@ function buildPayload(joinedRows){
     a4(bm_univA,mi+'|'+si+'|'+sti+'|'+lti+'|'+bmi,L,R,Rd,Rc);
 
     // Web ID (Direct Push / L1 Nurtured) dimension
-    a4(wmA,wi+'|'+li,L,R,Rd,Rc);
-    a4(cwmA,ci+'|'+wi+'|'+li,L,R,Rd,Rc);
-    a4(wunivA,mi+'|'+wi+'|'+sti+'|'+lti+'|'+li,L,R,Rd,Rc);
+    if(showOnCreate){
+      a4(wmA,wi+'|'+li,L,R,Rd,Rc);
+      a4(cwmA,ci+'|'+wi+'|'+li,L,R,Rd,Rc);
+      a4(wunivA,mi+'|'+wi+'|'+sti+'|'+lti+'|'+li,L,R,Rd,Rc);
+    }
     a4(bm_wmA,wi+'|'+bmi,L,R,Rd,Rc);
     a4(bm_cwmA,ci+'|'+wi+'|'+bmi,L,R,Rd,Rc);
     a4(bm_wunivA,mi+'|'+wi+'|'+sti+'|'+lti+'|'+bmi,L,R,Rd,Rc);
 
-    // Retail Dispersion (day-bucket legacy — kept for data integrity)
-    if(r.isBooked&&r.leadDate&&r.retailDate){
+    // Retail Dispersion (day-bucket legacy — kept for data integrity, On Create only)
+    if(showOnCreate&&r.isBooked&&r.leadDate&&r.retailDate){
       const days=Math.max(0,Math.round((r.retailDate.getTime()-r.leadDate.getTime())/86400000));
       const bk=bdBucket(days);
       const rep=BD_REP[bk];
@@ -955,16 +963,16 @@ function buildPayload(joinedRows){
       const Ra2=1,Rd2=(r.callType==='dms')?1:0,Rc2=(r.callType==='co')?1:0;
       const purMI=idx(purMdlArr,purMdlMap,canonPurMdl(r.purchasedModel||''));
       // Purchased-model × source × month (retail only — L=0)
-      a4(pmsmA,purMI+'|'+si+'|'+li,0,Ra2,Rd2,Rc2);
+      if(showOnCreate)a4(pmsmA,purMI+'|'+si+'|'+li,0,Ra2,Rd2,Rc2);
       a4(bm_pmsmA,purMI+'|'+si+'|'+bmi,0,Ra2,Rd2,Rc2);
       // Purchased-model × LT × source × month (retail only — L=0)
-      a4(pm_ltmA,purMI+'|'+lti+'|'+si+'|'+li,0,Ra2,Rd2,Rc2);
+      if(showOnCreate)a4(pm_ltmA,purMI+'|'+lti+'|'+si+'|'+li,0,Ra2,Rd2,Rc2);
       a4(bm_pm_ltmA,purMI+'|'+lti+'|'+si+'|'+bmi,0,Ra2,Rd2,Rc2);
       // Purchased-model × city × source × month (retail only — L=0)
-      a4(pm_csmA,purMI+'|'+ci+'|'+si+'|'+li,0,Ra2,Rd2,Rc2);
+      if(showOnCreate)a4(pm_csmA,purMI+'|'+ci+'|'+si+'|'+li,0,Ra2,Rd2,Rc2);
       a4(bm_pm_csmA,purMI+'|'+ci+'|'+si+'|'+bmi,0,Ra2,Rd2,Rc2);
       // Purchased-model × state × month (retail only — L=0): for retail heatmap
-      a4(pm_mxstA,purMI+'|'+sti+'|'+li,0,Ra2,Rd2,Rc2);
+      if(showOnCreate)a4(pm_mxstA,purMI+'|'+sti+'|'+li,0,Ra2,Rd2,Rc2);
       a4(bm_pm_mxstA,purMI+'|'+sti+'|'+bmi,0,Ra2,Rd2,Rc2);
       const enqN=normMdl(r.model);
       const purN=normMdl(r.purchasedModel);
