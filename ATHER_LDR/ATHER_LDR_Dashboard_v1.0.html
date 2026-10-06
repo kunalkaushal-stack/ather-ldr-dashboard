@@ -554,26 +554,47 @@ function parseAtherLeadRows(raw){
     }
     return'';
   }
+  // Pre-scan: collect opty_ids that have at least one in-scope (Jan'25+) Unique entry.
+  // A Duplicate lead is only excluded if its opty_id already has an in-scope Unique entry
+  // (the Unique entry handles the retail join). If no in-scope Unique entry exists — because
+  // the Unique row was created before Jan'25 and excluded by the parse floor — the Duplicate
+  // row is the only way to attribute that lead's retail, so it's allowed through.
+  const leadParseFloor=atherMonthOrder("Jan'2025");
+  const DUP_ALIASES=['duplicate check','duplicity check','duplicate','is duplicate','isdup','is_duplicate'];
+  const OPTY_ALIASES=['opty_id','opty id','lead id','leadid','lead_id','opportunity id','opportunity_id'];
+  const LM_ALIASES=['lead month','lead_month','leadmonth','month'];
+  const uniqueOptySet=new Set();
+  for(const r of raw){
+    const oid=get(r,OPTY_ALIASES);
+    if(!oid)continue;
+    const dupRaw=get(r,DUP_ALIASES);
+    if(dupRaw&&dupRaw.toLowerCase()!=='unique')continue; // only scan Unique entries
+    const lm_=normalizeAtherMonth(get(r,LM_ALIASES));
+    const lmo_=atherMonthOrder(lm_);
+    if(lmo_===0||lmo_<leadParseFloor)continue; // Unique entry before floor → doesn't block duplicate
+    uniqueOptySet.add(oid);
+  }
   const rows=[];
-  let excludedBeforeCutoff=0,excludedInvalidDate=0;
+  let excludedBeforeCutoff=0,excludedInvalidDate=0,excludedDupHasUnique=0;
   let earliestDate=null,latestDate=null;
   for(const r of raw){
-    const opty_id=get(r,['opty_id','opty id','lead id','leadid','lead_id','opportunity id','opportunity_id']);
-    const lead_month_raw=get(r,['lead month','lead_month','leadmonth','month']);
+    const opty_id=get(r,OPTY_ALIASES);
+    const lead_month_raw=get(r,LM_ALIASES);
     const lead_month=normalizeAtherMonth(lead_month_raw);
     if(!opty_id||!lead_month)continue; // structural skip (not counted in cutoff diagnostics)
-    // PRIMARY GATE: Lead_Month must be May'2026 or later.
+    // PRIMARY GATE: Lead_Month must be Jan'2025 or later.
     // NOTE: lead_month is sourced from the 'lead_month'/'lead month'/'month' COLUMN in the sheet.
     // The auto-detected date column (leadDateColKey) is used ONLY to populate leadDate for
     // day-level Dispersion (BDM) calculations — it does NOT determine lead_month.
     const lmo=atherMonthOrder(lead_month);
-    const leadParseFloor=atherMonthOrder("Jan'2025"); // include leads from Jan'25 for On Update join
     if(lmo===0){excludedInvalidDate++;continue;} // unparseable month
     if(lmo<leadParseFloor){excludedBeforeCutoff++;continue;} // before Jan'2025 → exclude
-    const dup=get(r,['duplicate check','duplicity check','duplicate','is duplicate','isdup','is_duplicate']);
+    const dup=get(r,DUP_ALIASES);
     const isUnique=dup?dup.toLowerCase()==='unique':true;
-    // Skip cross-month duplicate opty_ids — only 'Unique' rows enter analysis
-    if(!isUnique)continue;
+    // Skip Duplicate only if its opty_id already has an in-scope Unique entry.
+    // Duplicates with no in-scope Unique counterpart are allowed through so their retails
+    // can be joined (they contribute R but the same L as any other lead).
+    if(!isUnique&&uniqueOptySet.has(opty_id)){excludedDupHasUnique++;continue;}
     let leadDate=null;
     {
       // capture day-level date if available for Dispersion
@@ -615,7 +636,7 @@ function parseAtherLeadRows(raw){
   const uniqueIds=new Set(rows.map(r=>r.opty_id)).size;
   const statusNameRawKey=keyMap['status_name']||keyMap['status name']||keyMap['statusname']||'';
   const statusNameNonBlankCount=rows.filter(r=>r.statusName&&r.statusName.trim()!=='').length;
-  return{rows,diagnostics:{totalRows:raw.length,included:rows.length,uniqueIds,dupIds:rows.length-uniqueIds,excludedBeforeCutoff,excludedInvalidDate,earliestDate,latestDate,detectedDateCol,sampleDateValues,allLeadCols,statusNameRawKey,statusNameNonBlankCount,webIdDetectedCol:webIdRawKey||'(not detected)'}};
+  return{rows,diagnostics:{totalRows:raw.length,included:rows.length,uniqueIds,dupIds:rows.length-uniqueIds,excludedBeforeCutoff,excludedInvalidDate,excludedDupHasUnique,earliestDate,latestDate,detectedDateCol,sampleDateValues,allLeadCols,statusNameRawKey,statusNameNonBlankCount,webIdDetectedCol:webIdRawKey||'(not detected)'}};
 }
 
 function parseAtherRetailRows(raw){
