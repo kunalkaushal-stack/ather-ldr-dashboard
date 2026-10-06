@@ -1319,6 +1319,164 @@ function ViewerCsvGate(){
   );
 }
 
+/* ════════════════════════════════════════════════════════════════════
+   DETAIL TABLE MODAL — paginated lead-level detail view
+   ════════════════════════════════════════════════════════════════════ */
+function DetailModal({ rawJoined, filters, RT, leadsMode, title, monthOverride, onClose }) {
+  const [search, setSearch] = useState('');
+  const [page, setPage] = useState(0);
+  const PAGE_SIZE = 100;
+
+  const filteredRows = useMemo(() => {
+    if (!rawJoined || !rawJoined.length) return [];
+    const { months:mf, sources:sf, leadTypes:ltf, models:mdf, states:stf, cities:cf } = filters;
+    const allM=!mf||mf.size===0; const allS=!sf||sf.size===0;
+    const allLT=!ltf||ltf.size===0; const allMdl=!mdf||mdf.size===0;
+    const allSt=!stf||stf.size===0; const allCity=!cf||cf.size===0;
+    const rows = [];
+    for (const r of rawJoined) {
+      const effMonth=(leadsMode==='update'&&r.isBooked&&r.booking_month)?r.booking_month:r.lead_month;
+      if (monthOverride) { if (effMonth!==monthOverride) continue; }
+      else if (!allM) { if (mf===FILTER_CLEARED||!mf.has(effMonth)) continue; }
+      if (!allS&&(sf===FILTER_CLEARED||!sf.has(r.source))) continue;
+      if (!allLT&&(ltf===FILTER_CLEARED||!ltf.has(r.lt))) continue;
+      if (!allMdl&&(mdf===FILTER_CLEARED||!mdf.has(r.model))) continue;
+      if (!allSt&&(stf===FILTER_CLEARED||!stf.has(r.state))) continue;
+      if (!allCity&&(cf===FILTER_CLEARED||!cf.has(r.city))) continue;
+      rows.push(r);
+    }
+    return rows;
+  }, [rawJoined, filters, leadsMode, monthOverride]);
+
+  const displayRows = useMemo(() => {
+    if (!search.trim()) return filteredRows;
+    const q = search.toLowerCase();
+    return filteredRows.filter(r =>
+      (r.opty_id||'').toLowerCase().includes(q) ||
+      (r.source||'').toLowerCase().includes(q) ||
+      (r.model||'').toLowerCase().includes(q) ||
+      (r.state||'').toLowerCase().includes(q) ||
+      (r.city||'').toLowerCase().includes(q) ||
+      (r.lt||'').toLowerCase().includes(q) ||
+      (r.lead_month||'').toLowerCase().includes(q) ||
+      (r.purchasedModel||'').toLowerCase().includes(q)
+    );
+  }, [filteredRows, search]);
+
+  const totalPages = Math.max(1, Math.ceil(displayRows.length / PAGE_SIZE));
+  const safePage = Math.min(page, totalPages - 1);
+  const pageRows = displayRows.slice(safePage * PAGE_SIZE, (safePage + 1) * PAGE_SIZE);
+
+  function handleDownload() {
+    const hdr = ['Opty ID','Lead Month','Source','Model','Lead Type','State','City',
+      'Status','Purchased Model','Retail Month','Call Type','Retail Date'];
+    const fmtD = d => (d instanceof Date && !isNaN(d.getTime())) ? formatRetailDate(d) : '';
+    const aoa = [hdr, ...filteredRows.map(r => {
+      const isRA = r.isBooked && r.booking_month;
+      return [r.opty_id||'', r.lead_month||'', r.source||'', r.model||'', r.lt||'',
+        r.state||'', r.city||'', r.statusName||'',
+        isRA?(r.purchasedModel||''):'', isRA?(r.booking_month||''):'',
+        isRA?(r.callType||''):'', isRA?fmtD(r.retailDate):''];
+    })];
+    exportCsv(aoa, 'Detailed_' + (title||'Leads').replace(/[^a-z0-9]/gi,'_') + '.csv');
+  }
+
+  const thSt = { padding:'7px 10px', fontSize:10, fontWeight:700, color:'#475569',
+    background:'#F1F5F9', borderBottom:'2px solid #E2E8F0', whiteSpace:'nowrap', textAlign:'left' };
+  const tdSt = { padding:'5px 10px', fontSize:11, borderBottom:'1px solid #F1F5F9', maxWidth:180,
+    overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' };
+
+  return ce('div', {
+    style:{position:'fixed',top:0,left:0,right:0,bottom:0,background:'rgba(0,0,0,.55)',
+      zIndex:1000,display:'flex',alignItems:'center',justifyContent:'center',padding:20},
+    onClick: e => { if (e.target===e.currentTarget) onClose(); }
+  },
+    ce('div', { style:{background:'#fff',borderRadius:12,width:'min(1200px,96vw)',
+      maxHeight:'92vh',display:'flex',flexDirection:'column',overflow:'hidden',
+      boxShadow:'0 8px 48px rgba(0,0,0,.3)'} },
+      // Header
+      ce('div', { style:{display:'flex',alignItems:'center',justifyContent:'space-between',
+        padding:'14px 18px',borderBottom:'2px solid #E2E8F0',background:'#F8FAFC',flexShrink:0} },
+        ce('div', null,
+          ce('div', { style:{fontSize:14,fontWeight:700,color:'#1E293B'} }, title || 'Detailed Leads'),
+          ce('div', { style:{fontSize:11,color:'#64748B',marginTop:2} },
+            filteredRows.length.toLocaleString('en-IN') + ' leads' +
+            (search ? ' · ' + displayRows.length.toLocaleString('en-IN') + ' matching' : ''))
+        ),
+        ce('div', { style:{display:'flex',gap:8,alignItems:'center'} },
+          ce('input', { placeholder:'Search…', value:search,
+            onChange:e=>{setSearch(e.target.value);setPage(0);},
+            style:{padding:'5px 10px',borderRadius:8,border:'1px solid #CBD5E1',
+              fontSize:11,fontFamily:'inherit',outline:'none',width:200} }),
+          ce('button', { onClick:handleDownload,
+            style:{padding:'6px 14px',fontSize:11,fontWeight:700,border:'1px solid #D1FAE5',
+              borderRadius:8,background:'#ECFDF5',color:'#065F46',cursor:'pointer',
+              fontFamily:'inherit',whiteSpace:'nowrap'} }, '↓ Download CSV'),
+          ce('button', { onClick:onClose,
+            style:{padding:'6px 12px',fontSize:13,fontWeight:700,border:'1px solid #E2E8F0',
+              borderRadius:8,background:'#fff',color:'#64748B',cursor:'pointer',
+              fontFamily:'inherit',lineHeight:1} }, '×')
+        )
+      ),
+      // Table
+      ce('div', { style:{overflowY:'auto',flex:1} },
+        ce('table', { style:{width:'100%',borderCollapse:'collapse',fontSize:12} },
+          ce('thead', null,
+            ce('tr', null,
+              ['Opty ID','Lead Month','Source','Model','Lead Type','State','City',
+               'Status','Purchased Model','Retail Month','Retail?']
+              .map((h,i) => ce('th', { key:i, style:thSt }, h))
+            )
+          ),
+          ce('tbody', null,
+            pageRows.length === 0
+              ? ce('tr', null, ce('td', { colSpan:11, style:{textAlign:'center',padding:20,color:'#94A3B8',fontSize:12} }, 'No rows'))
+              : pageRows.map((r,i) => {
+                const isRA = r.isBooked && r.booking_month;
+                return ce('tr', { key:i, style:{background:i%2===0?'#fff':'#FAFAFA'} },
+                  ce('td',{style:{...tdSt,fontFamily:'monospace',fontSize:10,color:'#64748B'}},r.opty_id||''),
+                  ce('td',{style:tdSt},r.lead_month||''),
+                  ce('td',{style:tdSt},r.source||''),
+                  ce('td',{style:tdSt},r.model||''),
+                  ce('td',{style:tdSt},r.lt||''),
+                  ce('td',{style:tdSt},r.state||''),
+                  ce('td',{style:tdSt},r.city||''),
+                  ce('td',{style:{...tdSt,color:'#94A3B8'}},r.statusName||''),
+                  ce('td',{style:{...tdSt,color:'#0891B2',fontWeight:isRA?700:400}},isRA?(r.purchasedModel||''):'—'),
+                  ce('td',{style:{...tdSt,color:'#059669',fontWeight:isRA?700:400}},isRA?(r.booking_month||''):'—'),
+                  ce('td',{style:{...tdSt,textAlign:'center'}},isRA?
+                    ce('span',{style:{background:'#D1FAE5',color:'#065F46',borderRadius:4,padding:'2px 6px',fontSize:10,fontWeight:700}},'✓'):
+                    ce('span',{style:{color:'#CBD5E1',fontSize:10}},'—'))
+                );
+              })
+          )
+        )
+      ),
+      // Footer / pagination
+      totalPages > 1 && ce('div', { style:{display:'flex',alignItems:'center',justifyContent:'space-between',
+        padding:'10px 18px',borderTop:'1px solid #E2E8F0',background:'#F8FAFC',flexShrink:0} },
+        ce('span', { style:{fontSize:11,color:'#64748B'} },
+          'Page ' + (safePage+1) + ' of ' + totalPages + ' · rows ' +
+          (safePage*PAGE_SIZE+1) + '–' + Math.min((safePage+1)*PAGE_SIZE, displayRows.length)),
+        ce('div', { style:{display:'flex',gap:6} },
+          ce('button', { onClick:()=>setPage(0), disabled:safePage===0,
+            style:{padding:'4px 8px',fontSize:11,borderRadius:6,border:'1px solid #CBD5E1',
+              background:'#fff',cursor:safePage===0?'default':'pointer',color:safePage===0?'#CBD5E1':'#374151'} }, '«'),
+          ce('button', { onClick:()=>setPage(p=>Math.max(0,p-1)), disabled:safePage===0,
+            style:{padding:'4px 8px',fontSize:11,borderRadius:6,border:'1px solid #CBD5E1',
+              background:'#fff',cursor:safePage===0?'default':'pointer',color:safePage===0?'#CBD5E1':'#374151'} }, '‹'),
+          ce('button', { onClick:()=>setPage(p=>Math.min(totalPages-1,p+1)), disabled:safePage===totalPages-1,
+            style:{padding:'4px 8px',fontSize:11,borderRadius:6,border:'1px solid #CBD5E1',
+              background:'#fff',cursor:safePage===totalPages-1?'default':'pointer',color:safePage===totalPages-1?'#CBD5E1':'#374151'} }, '›'),
+          ce('button', { onClick:()=>setPage(totalPages-1), disabled:safePage===totalPages-1,
+            style:{padding:'4px 8px',fontSize:11,borderRadius:6,border:'1px solid #CBD5E1',
+              background:'#fff',cursor:safePage===totalPages-1?'default':'pointer',color:safePage===totalPages-1?'#CBD5E1':'#374151'} }, '»')
+        )
+      )
+    )
+  );
+}
+
 function isRetailedLead(r) {
   if (!r.isBooked || !r.booking_month || !r.lead_month) return false;
   const d = atherMonthOrder(r.booking_month) - atherMonthOrder(r.lead_month);
@@ -1597,6 +1755,11 @@ const DimGrid = React.memo(function DimGrid({
   const { grand, grandSrc, dimAggs } = agg;
   const gL = (grandForContrib || grand).l;
   const gR = (grandForContrib || grand).r;
+  // Internal sort state
+  const [sk, setSk] = useState('l');
+  const [sAsc, setSAsc] = useState(false);
+  function toggleSort(key) { if(sk===key) setSAsc(a=>!a); else { setSk(key); setSAsc(false); } }
+  function sortArrow(key) { return sk===key ? (sAsc?' ↑':' ↓') : ' ⇅'; }
 
   function contrib(l) { return gL > 0 ? l / gL * 100 : 0; }
   function rContrib(r) { return gR > 0 ? r / gR * 100 : 0; }
@@ -1662,11 +1825,21 @@ const DimGrid = React.memo(function DimGrid({
 
   const dimRows = noSort
     ? Object.entries(dimAggs)
-    : Object.entries(dimAggs).sort((a,b) => b[1].total.l - a[1].total.l);
+    : Object.entries(dimAggs).sort((a,b) => {
+        const [ak, da] = a, [bk, db] = b;
+        if (sk==='label') return sAsc ? ak.localeCompare(bk) : bk.localeCompare(ak);
+        let av=0,bv=0;
+        if (sk==='l') { av=da.total.l; bv=db.total.l; }
+        else if (sk==='r') { av=da.total.r; bv=db.total.r; }
+        else if (sk==='l2r') { av=da.total.l2r; bv=db.total.l2r; }
+        return sAsc ? av-bv : bv-av;
+      });
 
   // Header row 1 — top-level group names (sub-groups shown as peers when parent expanded)
   const hdr1 = [
-    ce('th', { key:'dim', className:'left', rowSpan:2, style:{minWidth:160,zIndex:3,background:'#1D4ED8',color:'#fff'} }, dimLabel),
+    ce('th', { key:'dim', className:'left', rowSpan:2,
+      style:{minWidth:160,zIndex:3,background:'#1D4ED8',color:'#fff',cursor:'pointer',userSelect:'none'},
+      onClick:()=>toggleSort('label'), title:'Sort A–Z / Z–A' }, dimLabel + sortArrow('label')),
     ce('th', { key:'tot', colSpan:5, style:{background:'#1D4ED8',color:'#fff'} }, 'TOTAL'),
     ...(viewerMode ? [] : visibleCols.map(col => {
       const hasChildren = !col.isChild && col.subGroups && col.subGroups.filter(sg=>sg.srcs.length>0).length > 1;
@@ -1688,13 +1861,17 @@ const DimGrid = React.memo(function DimGrid({
   ];
 
   // Header row 2 — LEADS | L.CONTRIB% | RETAIL | R.CONTRIB% | L2R% per visible col
+  const sortThSt = (key) => ({cursor:'pointer', userSelect:'none', whiteSpace:'nowrap',
+    background: sk===key ? '#1E40AF' : undefined, transition:'background .1s'});
   const hdr2 = [
-    ...(noGroupHeaders ? [ce('th', { key:'dim', className:'left', style:{minWidth:160,zIndex:3,background:'#1D4ED8',color:'#fff'} }, dimLabel)] : []),
-    ce('th', { key:'tl', className:'sub' }, 'Leads'),
+    ...(noGroupHeaders ? [ce('th', { key:'dim', className:'left',
+      style:{minWidth:160,zIndex:3,background:'#1D4ED8',color:'#fff',...sortThSt('label')},
+      onClick:()=>toggleSort('label'), title:'Sort by name' }, dimLabel+sortArrow('label'))] : []),
+    ce('th', { key:'tl', className:'sub', style:sortThSt('l'), onClick:()=>toggleSort('l'), title:'Sort by Leads' }, 'Leads'+sortArrow('l')),
     ce('th', { key:'tlc', className:'sub' }, 'L.Contrib%'),
-    ce('th', { key:'tr', className:'sub' }, 'Retail'),
+    ce('th', { key:'tr', className:'sub', style:sortThSt('r'), onClick:()=>toggleSort('r'), title:'Sort by Retail' }, 'Retail'+sortArrow('r')),
     ce('th', { key:'trc', className:'sub' }, 'R.Contrib%'),
-    ce('th', { key:'tl2r', className:'sub' }, 'L2R%'),
+    ce('th', { key:'tl2r', className:'sub', style:sortThSt('l2r'), onClick:()=>toggleSort('l2r'), title:'Sort by L2R%' }, 'L2R%'+sortArrow('l2r')),
     ...(viewerMode ? [] : visibleCols.flatMap(col => [
       ce('th', { key:col.id+'l', className:'sub', style: col.borderLeft ? {borderLeft:col.borderLeft} : {} }, 'Leads'),
       ce('th', { key:col.id+'lc', className:'sub' }, 'L.Contrib%'),
@@ -1807,6 +1984,11 @@ const OverviewTab = React.memo(function OverviewTab({ data, filters, RT }) {
 
   const allSrcs = useMemo(() => [...new Set(maps.src)], [maps]);
   const srcGroups = useMemo(() => buildSrcGroups(allSrcs), [allSrcs]);
+  const [srcSortKey, setSrcSortKey] = useState('l');
+  const [srcSortAsc, setSrcSortAsc] = useState(false);
+  const [showTrendTable, setShowTrendTable] = useState(false);
+  function toggleSrcSort(key) { if(srcSortKey===key) setSrcSortAsc(a=>!a); else{setSrcSortKey(key);setSrcSortAsc(false);} }
+  function srcArrow(key) { return srcSortKey===key ? (srcSortAsc?' ↑':' ↓') : ' ⇅'; }
   const paidGrp = srcGroups.find(g => g.id === 'paid');
   const orgGrp  = srcGroups.find(g => g.id === 'organic');
   const hasCityFilter = filters.cities && filters.cities.size > 0 && cm && maps.city;
@@ -2149,8 +2331,47 @@ const OverviewTab = React.memo(function OverviewTab({ data, filters, RT }) {
       ))
     ),
     ce('div', { className:'card', style:{padding:'16px 18px',marginBottom:14} },
-      ce('div', { className:'section-title' }, 'Month-wise Trend — Leads, Retails & L2R%'),
-      ce('div', { style:{height:260,position:'relative'} }, ce('canvas', { ref:chartRef }))
+      ce('div', { style:{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:4} },
+        ce('div', { className:'section-title', style:{marginBottom:0} }, 'Month-wise Trend — Leads, Retails & L2R%'),
+        ce('div', { style:{display:'flex',gap:6,alignItems:'center'} },
+          ce('button', { onClick:()=>{
+            const aoa=[['Month','Leads','Retail','L2R%'],...trendData.map(d=>[d.m,d.l,d.r,+d.l2r.toFixed(2)])];
+            exportCsv(aoa,'Ather_Trend_Data.csv');
+          }, style:{padding:'5px 10px',fontSize:10,fontWeight:700,border:'1px solid #D1FAE5',
+            borderRadius:6,background:'#ECFDF5',color:'#065F46',cursor:'pointer',fontFamily:'inherit',whiteSpace:'nowrap'} },
+          '↓ CSV'),
+          ce('button', { onClick:()=>setShowTrendTable(t=>!t),
+            style:{padding:'5px 10px',fontSize:10,fontWeight:700,border:'1px solid #DBEAFE',
+              borderRadius:6,background:showTrendTable?'#DBEAFE':'#EFF6FF',color:'#1E40AF',
+              cursor:'pointer',fontFamily:'inherit',whiteSpace:'nowrap'} },
+            showTrendTable?'Hide Table':'Show Table')
+        )
+      ),
+      ce('div', { style:{height:260,position:'relative',marginTop:8} }, ce('canvas', { ref:chartRef })),
+      showTrendTable && ce('div', { style:{marginTop:12,overflowX:'auto'} },
+        ce('table', { style:{width:'100%',borderCollapse:'collapse',fontSize:12} },
+          ce('thead', null, ce('tr', null,
+            ['Month','Leads','Retail','L2R%'].map((h,i) =>
+              ce('th', { key:i, style:{padding:'6px 10px',fontSize:10,fontWeight:700,
+                color:'#475569',background:'#F8FAFC',borderBottom:'2px solid #E2E8F0',
+                textAlign:i===0?'left':'right',whiteSpace:'nowrap'} }, h))
+          )),
+          ce('tbody', null,
+            trendData.map((d,i) => ce('tr', { key:i, style:{background:i%2===0?'#fff':'#FAFAFA'} },
+              ce('td',{style:{padding:'5px 10px',fontWeight:600}},d.m),
+              ce('td',{style:{padding:'5px 10px',textAlign:'right',color:'#003087',fontWeight:600}},Nf(d.l)),
+              ce('td',{style:{padding:'5px 10px',textAlign:'right',color:'#0891B2',fontWeight:700}},Nf(d.r)),
+              ce('td',{style:{padding:'5px 10px',textAlign:'right',color:'#D97706',fontWeight:600}},d.l>0?d.l2r.toFixed(1)+'%':'—')
+            )),
+            ce('tr',{className:'total-row'},
+              ce('td',{style:{padding:'5px 10px',fontWeight:700,color:'#1A237E'}},'∑ Total'),
+              ce('td',{style:{padding:'5px 10px',textAlign:'right',fontWeight:700,color:'#003087'}},Nf(trendData.reduce((s,d)=>s+d.l,0))),
+              ce('td',{style:{padding:'5px 10px',textAlign:'right',fontWeight:700,color:'#0891B2'}},Nf(trendData.reduce((s,d)=>s+d.r,0))),
+              ce('td',{style:{padding:'5px 10px',textAlign:'right',color:'#D97706',fontWeight:700}},(()=>{const l=trendData.reduce((s,d)=>s+d.l,0),r=trendData.reduce((s,d)=>s+d.r,0);return l>0?(r/l*100).toFixed(1)+'%':'—';})())
+            )
+          )
+        )
+      )
     ),
     totals.l > 0 && ce('div', { className:'card', style:{padding:'10px 18px',marginBottom:14,borderTop:'3px solid #6366F1'} },
       ce('div', { style:{display:'flex',flexWrap:'wrap',alignItems:'stretch'} },
@@ -2186,15 +2407,21 @@ const OverviewTab = React.memo(function OverviewTab({ data, filters, RT }) {
       ce('div', { className:'scroll-x' },
         ce('table', null,
           ce('thead', null, ce('tr', null,
-            ce('th', { className:'left', style:{minWidth:140} }, 'Source'),
-            ce('th', null, 'Leads'),
+            ce('th', { className:'left', style:{minWidth:140,cursor:'pointer',userSelect:'none'}, onClick:()=>toggleSrcSort('src') }, 'Source'+srcArrow('src')),
+            ce('th', { style:{cursor:'pointer',userSelect:'none'}, onClick:()=>toggleSrcSort('l') }, 'Leads'+srcArrow('l')),
             ce('th', null, 'L.Contrib%'),
-            ce('th', null, 'Retails'),
+            ce('th', { style:{cursor:'pointer',userSelect:'none'}, onClick:()=>toggleSrcSort('r') }, 'Retails'+srcArrow('r')),
             ce('th', null, 'R.Contrib%'),
-            ce('th', null, 'L2R%'),
+            ce('th', { style:{cursor:'pointer',userSelect:'none'}, onClick:()=>toggleSrcSort('l2r') }, 'L2R%'+srcArrow('l2r')),
           )),
           ce('tbody', null,
-            ...srcBreak.map((s,i) => ce('tr', { key:i },
+            ...[...srcBreak].sort((a,b) => {
+              let av,bv;
+              if (srcSortKey==='src') return srcSortAsc?a.src.localeCompare(b.src):b.src.localeCompare(a.src);
+              av = srcSortKey==='r'?a.r:srcSortKey==='l2r'?a.l2r:a.l;
+              bv = srcSortKey==='r'?b.r:srcSortKey==='l2r'?b.l2r:b.l;
+              return srcSortAsc?av-bv:bv-av;
+            }).map((s,i) => ce('tr', { key:i },
               ce('td', { className:'label' }, s.src),
               ce('td', null, Nf(s.l)),
               ce('td', null, totals.l > 0 ? Pf(s.l/totals.l*100) : '—'),
@@ -3692,10 +3919,16 @@ const GeoAndDealerTab = React.memo(function GeoAndDealerTab({ data, filters, mon
   function Nf2(v){ return (v||0).toLocaleString('en-IN'); }
   function pct(r,l){ return l>0?(r/l*100).toFixed(1)+'%':'—'; }
 
+  function downloadDealerCsv() {
+    const aoa = [['Dealer Code','Dealer','State','Region','City','Leads','Retail','Conv%']];
+    for (const r of sorted) aoa.push([r.oemCrmId,r.dealer||'',r.state,r.region,r.city,r.leads,r.retail,r.leads>0?+(r.retail/r.leads*100).toFixed(1):0]);
+    exportCsv(aoa, 'Ather_Dealer_Performance.csv');
+  }
   return ce('div', null,
-    ce('div', { style:{ display:'flex', alignItems:'center', gap:12, marginBottom:12 } },
+    ce('div', { style:{ display:'flex', alignItems:'center', gap:12, marginBottom:12, flexWrap:'wrap' } },
       ce('input',{ placeholder:'Search dealer, state, city\u2026', value:search, onChange:function(e){setSearch(e.target.value);}, style:{ padding:'6px 12px', borderRadius:8, border:'1px solid #CBD5E1', fontSize:12, width:260, fontFamily:'inherit', outline:'none' } }),
-      ce('span', { style:{ fontSize:12, color:'#64748B' } }, sorted.length.toLocaleString('en-IN')+' dealers')
+      ce('span', { style:{ fontSize:12, color:'#64748B' } }, sorted.length.toLocaleString('en-IN')+' dealers'),
+      ce('button', { onClick:downloadDealerCsv, style:{padding:'5px 10px',fontSize:10,fontWeight:700,border:'1px solid #D1FAE5',borderRadius:6,background:'#ECFDF5',color:'#065F46',cursor:'pointer',fontFamily:'inherit',whiteSpace:'nowrap',marginLeft:'auto'} }, '↓ Download CSV')
     ),
     ce('div',{ style:{ overflowX:'auto' } },
       ce('table',{ style:{ width:'100%', borderCollapse:'collapse', fontSize:12 } },
@@ -3760,6 +3993,7 @@ function App({fbUser,role,presence,onSignOut,onAdminOpen}){
   const [RT,setRT]=useState('all');
   const [filters,setFilters]=useState({months:new Set(),leadTypes:new Set(),sources:new Set(),models:new Set(),states:new Set(),cities:new Set(),purMdls:new Set()});
   const [isPending,startT]=useTransition();
+  const [detailModal,setDetailModal]=useState(null);
   const [fontScale,setFontScale]=useState(1.00);
   useEffect(()=>{document.documentElement.style.setProperty('--dashboard-font-scale',fontScale);},[fontScale]);
   const decFont=useCallback(()=>setFontScale(s=>{const i=FONT_STEPS.indexOf(+s.toFixed(2));return i>0?FONT_STEPS[i-1]:s;}),[]);
@@ -4102,9 +4336,11 @@ function App({fbUser,role,presence,onSignOut,onAdminOpen}){
   },[visibleTabs]);
 
   const onDetailedCsv=useCallback((tabName,month)=>{
-    const suffix=month?month.replace(/[^a-z0-9]/gi,'_'):'AllMonths';
-    exportDetailedCsv(rawJoined,filters,RT,leadsMode,'RE_'+tabName+'_Detailed_'+suffix+'.csv',month||null);
-  },[rawJoined,filters,RT,leadsMode]);
+    setDetailModal({
+      title: tabName.replace(/_/g,' ') + (month ? ' — ' + month : ' — All Months'),
+      monthOverride: month||null
+    });
+  },[]);
 
   const tabContent=useMemo(()=>{
     if(!effectiveData)return null;
@@ -4131,6 +4367,12 @@ function App({fbUser,role,presence,onSignOut,onAdminOpen}){
   if(!effectiveData)return ce(HeroSyncScreen,{onSync:handleSync,syncing,syncErr});
 
   return ce('div',{style:{minHeight:'100vh',background:'#f8fafc'}},
+    detailModal && ce(DetailModal, {
+      rawJoined, filters, RT, leadsMode,
+      title: detailModal.title,
+      monthOverride: detailModal.monthOverride,
+      onClose: () => setDetailModal(null)
+    }),
     /* Header */
     ce('div',{style:{background:'#164E63',padding:'0 24px',position:'sticky',top:0,zIndex:100,boxShadow:'0 2px 16px rgba(6,182,212,.20)'}},
       ce('div',{style:{maxWidth:1440,margin:'0 auto',display:'flex',alignItems:'center',gap:16}},
