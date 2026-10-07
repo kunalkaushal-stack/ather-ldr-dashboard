@@ -3918,11 +3918,11 @@ const ModelSourceTab = React.memo(function ModelSourceTab({ data, filters, month
     var getLR_leads = function(row){ return [row[row.length-4], 0]; };
     var srcFn   = function(row, maps){ return maps.src[row[1]]; };
     var monthFn = function(row, maps){ return maps.lm[row[2]]; };
-    // Leads: enquiry model dimension (what customers wanted)
-    var mdlDimFn = function(row, maps){ var mdl=maps.mdl[row[0]]; return (!allMdl && !filters.models.has(mdl)) ? null : (mdl||'Unknown'); };
+    // Leads: enquiry model dimension; KONARC/non-scope excluded
+    var mdlDimFn = function(row, maps){ var mdl=maps.mdl[row[0]]; if (!ATHER_SCOPE_MODELS.has(mdl)) return null; return (!allMdl && !filters.models.has(mdl)) ? null : mdl; };
     var leadsAgg  = aggMonth(mm, maps, M, filters.sources, mdlDimFn, srcFn, monthFn, null, getLR_leads);
-    // Retails: booking/purchased model dimension (what was actually sold)
-    var purMdlDimFn = function(row, maps){ var purMdl=maps.purMdl[row[0]]; return (!allMdl && !filters.models.has(purMdl)) ? null : (purMdl||'Unknown'); };
+    // Retails: booking/purchased model dimension; KONARC/non-scope excluded
+    var purMdlDimFn = function(row, maps){ var purMdl=maps.purMdl[row[0]]; if (!ATHER_SCOPE_MODELS.has(purMdl)) return null; return (!allMdl && !filters.models.has(purMdl)) ? null : purMdl; };
     var retailAgg = aggMonth(pmsm, maps, M, filters.sources, purMdlDimFn, srcFn, monthFn, null, getLR);
     return mergeLeadRetailAggs(leadsAgg, retailAgg);
   }, [mm, pmsm, maps, filters, getLR]);
