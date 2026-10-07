@@ -4612,28 +4612,39 @@ const ActionPlanTab = React.memo(function ActionPlanTab({ data, rawJoined, filte
     if (scatterInst.current) { try { scatterInst.current.destroy(); } catch(e){} }
     const pts = srcOpp.srcRows.filter(x=>x.l>=30).map(x=>({x:x.l, y:+x.l2r.toFixed(3), label:x.s, r:x.r}));
     const bench = srcOpp.bench;
+    const xMin = pts.length ? Math.min(...pts.map(p=>p.x))*0.9 : 0;
+    const xMax = pts.length ? Math.max(...pts.map(p=>p.x))*1.05 : 100;
     scatterInst.current = new Chart(canvas, {
       type:'scatter',
-      data:{datasets:[{
-        label:'Sources',
-        data: pts.map(p=>({x:p.x,y:p.y})),
-        backgroundColor: pts.map(p=>p.y>=bench?'#059669cc':p.y>=bench*0.75?'#D97706cc':'#DC2626cc'),
-        pointRadius: pts.map(p=>Math.max(6,Math.min(18,Math.sqrt(p.r)*2))),
-        pointHoverRadius: pts.map(p=>Math.max(8,Math.min(22,Math.sqrt(p.r)*2+2))),
-      }]},
+      data:{datasets:[
+        {
+          label:'Sources',
+          data: pts.map(p=>({x:p.x,y:p.y})),
+          backgroundColor: pts.map(p=>p.y>=bench?'#059669cc':p.y>=bench*0.75?'#D97706cc':'#DC2626cc'),
+          pointRadius: pts.map(p=>Math.max(6,Math.min(18,Math.sqrt(p.r)*2))),
+          pointHoverRadius: pts.map(p=>Math.max(8,Math.min(22,Math.sqrt(p.r)*2+2))),
+        },
+        {
+          type:'line',
+          label:'Benchmark',
+          data:[{x:xMin,y:bench},{x:xMax,y:bench}],
+          borderColor:'#1D4ED8',
+          borderWidth:1.5,
+          borderDash:[4,4],
+          pointRadius:0,
+          fill:false,
+          tension:0,
+        },
+      ]},
       options:{
         responsive:true, maintainAspectRatio:false,
         plugins:{
           legend:{display:false},
           tooltip:{backgroundColor:'rgba(11,22,41,.92)',titleColor:'#DBEAFE',bodyColor:'#93C5FD',padding:10,cornerRadius:8,
             callbacks:{
-              title: items => pts[items[0].dataIndex]?.label||'',
-              label: item => ['Leads: '+Nf(Math.round(item.raw.x)),'L2R%: '+item.raw.y.toFixed(2)+'%','vs benchmark: '+(item.raw.y/bench*100-100).toFixed(0)+'%'],
+              title: items => { const i=items[0]; return i.datasetIndex===0?(pts[i.dataIndex]?.label||''):'Benchmark'; },
+              label: item => item.datasetIndex===1?['Benchmark: '+bench.toFixed(2)+'%']:['Leads: '+Nf(Math.round(item.raw.x)),'L2R%: '+item.raw.y.toFixed(2)+'%','vs benchmark: '+(item.raw.y/bench*100-100).toFixed(0)+'%'],
             }},
-          annotation:{ annotations:{
-            hLine:{type:'line',yMin:bench,yMax:bench,borderColor:'#1D4ED8',borderWidth:1.5,borderDash:[4,4],
-              label:{content:'Benchmark '+bench.toFixed(2)+'%',enabled:true,position:'start',color:'#1D4ED8',font:{size:10}}},
-          }},
         },
         scales:{
           x:{grid:{color:'rgba(100,116,139,.1)'},ticks:{color:'#475569',font:{size:10}},
