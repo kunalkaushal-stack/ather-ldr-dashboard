@@ -4038,6 +4038,724 @@ const CitySourceTab  = function(){ return null; };
 const StateModelTab  = function(){ return null; };
 const CityModelTab   = function(){ return null; };
 /* ════════════════════════════════════════════════════════════════════
+   DIAGNOSIS TAB — Diagnostic Analytics
+   "Why is performance where it is?"
+   ════════════════════════════════════════════════════════════════════ */
+const DiagnosisTab = React.memo(function DiagnosisTab({ data, rawJoined, filters, months }) {
+  const rj = rawJoined || [];
+  function mSet_() { return filters.months && filters.months.size > 0 ? filters.months : new Set(months); }
+
+  const srcStats = useMemo(() => {
+    const mSet = mSet_();
+    const bySrc = {};
+    const byMon = {};
+    for (const r of rj) {
+      if (!mSet.has(r.lead_month)) continue;
+      const s = r.source || 'Unknown';
+      const m = r.lead_month;
+      if (!bySrc[s]) bySrc[s] = {l:0,r:0};
+      bySrc[s].l++;
+      if (r.isBooked) bySrc[s].r++;
+      if (!byMon[m]) byMon[m] = {};
+      if (!byMon[m][s]) byMon[m][s] = {l:0,r:0};
+      byMon[m][s].l++;
+      if (r.isBooked) byMon[m][s].r++;
+    }
+    let totL=0, totR=0;
+    for (const v of Object.values(bySrc)) { totL+=v.l; totR+=v.r; }
+    const bench = totL > 0 ? totR/totL*100 : 0;
+    const rows = Object.entries(bySrc)
+      .map(([s,{l,r}]) => ({ s, l, r, l2r:l>0?r/l*100:0, vs:bench>0?(l>0?r/l*100:0)/bench*100:0, delta:(l>0?r/l*100:0)-bench }))
+      .filter(x => x.l >= 5).sort((a,b) => b.l - a.l);
+    return { rows, bench, totL, totR, byMon };
+  }, [rj, filters, months]);
+
+  const funnel = useMemo(() => {
+    const mSet = mSet_();
+    let leads=0, enq=0, bookings=0;
+    for (const r of rj) {
+      if (!mSet.has(r.lead_month)) continue;
+      leads++;
+      if ((r.statusName||'').trim() === ENQUIRY_STATUS) enq++;
+      if (r.isBooked) bookings++;
+    }
+    const arbm = data.atherRetailByMonth || {};
+    let retails = 0;
+    for (const [m,cnt] of Object.entries(arbm)) { if (mSet.has(m)) retails += cnt; }
+    return { leads, enq, bookings, retails };
+  }, [rj, filters, months, data.atherRetailByMonth]);
+
+  const momData = useMemo(() => {
+    const sorted = [...months].sort((a,b) => atherMonthOrder(a)-atherMonthOrder(b));
+    if (sorted.length < 2) return null;
+    const cur = sorted[sorted.length-1], prev = sorted[sorted.length-2];
+    const curM = srcStats.byMon[cur]||{}, prevM = srcStats.byMon[prev]||{};
+    const allS = new Set([...Object.keys(curM), ...Object.keys(prevM)]);
+    const rows = [...allS].map(s => {
+      const c=curM[s]||{l:0,r:0}, p=prevM[s]||{l:0,r:0};
+      const cL2R=c.l>0?c.r/c.l*100:0, pL2R=p.l>0?p.r/p.l*100:0;
+      return {s, cL:c.l, cR:c.r, cL2R, pL:p.l, pR:p.r, pL2R, delta:cL2R-pL2R};
+    }).filter(x => x.cL>=20||x.pL>=20).sort((a,b)=>a.delta-b.delta);
+    return {rows, cur, prev};
+  }, [srcStats, months]);
+
+  const statusDist = useMemo(() => {
+    const mSet = mSet_();
+    const st = {};
+    for (const r of rj) {
+      if (!mSet.has(r.lead_month)) continue;
+      if (r.isBooked) continue;
+      const status = (r.statusName||'').trim() || 'Not Updated';
+      st[status] = (st[status]||0) + 1;
+    }
+    return Object.entries(st).sort((a,b)=>b[1]-a[1]).slice(0,8);
+  }, [rj, filters, months]);
+
+  const insights = useMemo(() => {
+    const msgs = [];
+    const { leads, enq, bookings, retails } = funnel;
+    if (leads > 0) {
+      const stages = [
+        {name:'Enquiry', drop:(leads-enq)/leads*100, from:'Leads'},
+        {name:'Booking', drop:enq>0?(enq-bookings)/enq*100:0, from:'Enquiries'},
+        {name:'Retail',  drop:bookings>0?(bookings-retails)/Math.max(bookings,1)*100:0, from:'Bookings'},
+      ].sort((a,b)=>b.drop-a.drop);
+      msgs.push('🔍 Biggest funnel leak: ' + stages[0].drop.toFixed(0) + '% of ' + stages[0].from + ' don't reach ' + stages[0].name + '. Fixing this stage will have the highest impact on retails.');
+    }
+    const underPerf = srcStats.rows.filter(x=>x.l>=100&&x.vs<75);
+    if (underPerf.length > 0) {
+      const gap = underPerf.reduce((s,x)=>s+Math.round(x.l*srcStats.bench/100)-x.r, 0);
+      msgs.push('⚠️ ' + underPerf.length + ' source(s) performing below 75% of benchmark (' + underPerf.map(x=>x.s).join(', ') + '). Fixing to benchmark = +' + Nf(gap) + ' retails/period.');
+    }
+    if (momData && momData.rows.length > 0) {
+      const worst = momData.rows[0];
+      if (worst.delta < -0.3 && worst.cL >= 50) {
+        const lost = Math.round(worst.cL * Math.abs(worst.delta) / 100);
+        msgs.push('📉 ' + worst.s + ' dropped ' + worst.pL2R.toFixed(1) + '% → ' + worst.cL2R.toFixed(1) + '% L2R (' + momData.prev + '→' + momData.cur + '), costing ~' + lost + ' retails. Investigate quality or follow-up breakdown.');
+      }
+    }
+    const star = srcStats.rows.find(x=>x.l>=100&&x.vs>=130);
+    if (star) msgs.push('⭐ ' + star.s + ' outperforms benchmark by ' + (star.vs-100).toFixed(0) + '% at ' + star.l2r.toFixed(1) + '% L2R. Consider scaling lead volume from this source.');
+    const topStatus = statusDist[0];
+    if (topStatus && topStatus[1] > 100) msgs.push('🕐 ' + Nf(topStatus[1]) + ' leads are stuck at "' + topStatus[0] + '" status — the largest unretailed pool. A targeted outreach campaign here could unlock immediate retails.');
+    return msgs;
+  }, [funnel, srcStats, momData, statusDist]);
+
+  const fMax = Math.max(funnel.leads, 1);
+  const funnelStages = [
+    {label:'Leads',    val:funnel.leads,    color:'#1D4ED8'},
+    {label:'Enquiries',val:funnel.enq,      color:'#7C3AED'},
+    {label:'Bookings', val:funnel.bookings, color:'#0891B2'},
+    {label:'Retails',  val:funnel.retails,  color:'#059669'},
+  ];
+
+  return ce('div', {className:'fade-up'},
+    insights.length > 0 && ce('div', {className:'card', style:{padding:'14px 18px',marginBottom:14,background:'#EFF6FF',border:'1.5px solid #BFDBFE'}},
+      ce('div', {style:{fontWeight:700,fontSize:11,color:'#1D4ED8',letterSpacing:.5,marginBottom:8}}, '🔎 DIAGNOSTIC INSIGHTS — AUTO-GENERATED FROM YOUR DATA'),
+      insights.map((msg,i) => ce('div',{key:i,style:{fontSize:12,color:'#1E3A5F',lineHeight:1.65,marginBottom:i<insights.length-1?8:0,paddingLeft:4}}, msg))
+    ),
+
+    ce('div', {style:{display:'grid',gridTemplateColumns:'1fr 1fr',gap:14,marginBottom:14}},
+      ce('div', {className:'card', style:{padding:'16px 18px'}},
+        ce('div', {className:'section-title'}, 'Conversion Funnel'),
+        ce('div', {style:{fontSize:10,color:'#64748B',marginBottom:12}}, 'Every lead's journey from entry to retail. Each drop-off percentage is a conversion problem.'),
+        ce('div', {style:{display:'flex',gap:6,alignItems:'flex-end',height:130}},
+          funnelStages.map((s,i,arr) => {
+            const pct = s.val/fMax;
+            const drop = i>0 ? (1-s.val/Math.max(arr[i-1].val,1))*100 : 0;
+            return ce('div',{key:s.label,style:{flex:1,display:'flex',flexDirection:'column',alignItems:'center',gap:2}},
+              ce('div',{style:{fontSize:9,fontWeight:700,color:'#334155',marginBottom:2}}, s.val>0?Nf(s.val):'—'),
+              ce('div',{style:{width:'72%',background:s.color,borderRadius:'3px 3px 0 0',height:Math.max(pct*110,4)+'px'}}),
+              ce('div',{style:{fontSize:9,color:'#334155',fontWeight:600,marginTop:3,textAlign:'center'}},s.label),
+              i>0&&ce('div',{style:{fontSize:8,color:drop>60?'#DC2626':drop>30?'#D97706':'#64748B',fontWeight:700}},'-'+drop.toFixed(0)+'%')
+            );
+          })
+        ),
+        ce('div',{style:{marginTop:12,display:'flex',flexWrap:'wrap',gap:6}},
+          funnelStages.map((s,i,arr) => {
+            if (i===0) return null;
+            const conv = arr[i-1].val>0 ? (s.val/arr[i-1].val*100).toFixed(1) : '—';
+            return ce('div',{key:s.label,style:{background:'#F8FAFC',border:'1px solid #E2E8F0',borderRadius:6,padding:'4px 8px',fontSize:10}},
+              ce('span',{style:{color:'#64748B'}},arr[i-1].label+'→'+s.label+': '),
+              ce('span',{style:{fontWeight:700,color:s.color}}, conv+'%')
+            );
+          })
+        )
+      ),
+
+      ce('div', {className:'card', style:{padding:'16px 18px'}},
+        ce('div', {className:'section-title'}, 'Source vs L2R% Benchmark'),
+        ce('div', {style:{fontSize:10,color:'#64748B',marginBottom:10}}, 'Benchmark (overall avg): ' + srcStats.bench.toFixed(2) + '% L2R.  🟢 Above  🟡 Near  🔴 Below'),
+        ce('div', {style:{display:'flex',flexDirection:'column',gap:7,maxHeight:210,overflowY:'auto'}},
+          srcStats.rows.slice(0,10).map(x => {
+            const c = x.vs>=100?'#059669':x.vs>=75?'#D97706':'#DC2626';
+            const dot = x.vs>=100?'🟢':x.vs>=75?'🟡':'🔴';
+            return ce('div',{key:x.s},
+              ce('div',{style:{display:'flex',justifyContent:'space-between',marginBottom:2}},
+                ce('span',{style:{fontSize:11,fontWeight:600,color:'#1E293B'}}, dot+' '+x.s),
+                ce('div',{style:{display:'flex',gap:8,alignItems:'center'}},
+                  ce('span',{style:{fontSize:10,color:'#94A3B8'}},Nf(x.l)+' leads'),
+                  ce('span',{style:{fontSize:12,color:c,fontWeight:700}},x.l2r.toFixed(2)+'%')
+                )
+              ),
+              ce('div',{style:{height:4,background:'#F1F5F9',borderRadius:4}},
+                ce('div',{style:{height:4,width:Math.min(x.vs/2,100)+'%',background:c,borderRadius:4}})
+              )
+            );
+          })
+        )
+      )
+    ),
+
+    momData && ce('div', {className:'card', style:{padding:'16px 18px',marginBottom:14}},
+      ce('div', {className:'section-title'}, 'Month-over-Month: '+momData.prev+' → '+momData.cur+' (L2R% Change by Source)'),
+      ce('div', {style:{fontSize:11,color:'#64748B',marginBottom:10}}, '"Retail Impact" = estimated retails gained or lost purely from the L2R% shift, using current month lead volume.'),
+      ce('div', {className:'scroll-x'},
+        ce('table', null,
+          ce('thead', null, ce('tr', null,
+            ce('th',{className:'left'},'Source'),
+            ce('th',null,momData.prev+' Leads'), ce('th',null,momData.prev+' L2R%'),
+            ce('th',null,momData.cur+' Leads'),  ce('th',null,momData.cur+' L2R%'),
+            ce('th',null,'L2R% Change'), ce('th',null,'Est. Retail Impact'),
+          )),
+          ce('tbody', null,
+            momData.rows.slice(0,12).map(x => {
+              const dc = x.delta>0?'#059669':x.delta<0?'#DC2626':'#64748B';
+              const imp = Math.round(x.cL * x.delta / 100);
+              return ce('tr',{key:x.s},
+                ce('td',{className:'label'},x.s),
+                ce('td',null,Nf(x.pL)),
+                ce('td',null,x.pL2R>0?x.pL2R.toFixed(2)+'%':'—'),
+                ce('td',null,Nf(x.cL)),
+                ce('td',null,x.cL2R>0?x.cL2R.toFixed(2)+'%':'—'),
+                ce('td',{style:{color:dc,fontWeight:700}},(x.delta>0?'+':'')+x.delta.toFixed(2)+'%'),
+                ce('td',{style:{color:dc,fontWeight:700}},imp!==0?(imp>0?'+':'')+imp+' retails':'—'),
+              );
+            })
+          )
+        )
+      )
+    ),
+
+    statusDist.length > 0 && ce('div', {className:'card', style:{padding:'16px 18px',marginBottom:14}},
+      ce('div', {className:'section-title'}, 'Where Unretailed Leads Are Stuck'),
+      ce('div', {style:{fontSize:11,color:'#64748B',marginBottom:12}}, 'Status distribution of leads that have NOT retailed. Large clusters at early stages = follow-up gap; at late stages = closing gap.'),
+      (() => {
+        const total = statusDist.reduce((s,[,v])=>s+v,0);
+        return ce('div',{style:{display:'flex',flexDirection:'column',gap:7}},
+          statusDist.map(([st,cnt]) => {
+            const pct = total>0?cnt/total*100:0;
+            return ce('div',{key:st,style:{display:'flex',alignItems:'center',gap:10}},
+              ce('div',{style:{width:200,fontSize:11,color:'#334155',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',flexShrink:0}},st),
+              ce('div',{style:{flex:1,height:12,background:'#F1F5F9',borderRadius:4}},
+                ce('div',{style:{height:12,width:pct+'%',background:'#3B82F6',borderRadius:4,minWidth:2}})
+              ),
+              ce('div',{style:{width:100,textAlign:'right',fontSize:11,color:'#475569',flexShrink:0}},Nf(cnt)+' ('+pct.toFixed(1)+'%)')
+            );
+          })
+        );
+      })()
+    )
+  );
+});
+
+/* ════════════════════════════════════════════════════════════════════
+   FORECAST TAB — Predictive Analytics
+   "What's coming next?"
+   ════════════════════════════════════════════════════════════════════ */
+const ForecastTab = React.memo(function ForecastTab({ data, rawJoined, filters, months }) {
+  const rj = rawJoined || [];
+  const cohortChartRef = useRef(null);
+  const cohortInstRef  = useRef(null);
+
+  // Cohort: for each lead_month, how many retailed in +0, +1, +2 months
+  const cohortData = useMemo(() => {
+    const c = {}; // {lm: {total, 0:n, 1:n, 2:n, 3:n}}
+    for (const r of rj) {
+      const lm = r.lead_month;
+      if (!lm) continue;
+      if (!c[lm]) c[lm] = {total:0};
+      c[lm].total++;
+      if (r.isBooked && r.booking_month) {
+        const lag = atherMonthOrder(r.booking_month) - atherMonthOrder(lm);
+        if (lag>=0 && lag<=3) c[lm][lag] = (c[lm][lag]||0)+1;
+      }
+    }
+    const sorted = Object.keys(c).sort((a,b)=>atherMonthOrder(a)-atherMonthOrder(b));
+    // Build rows: cohort, total, conv0%, conv1%, conv2%, cumConv
+    const rows = sorted.map(m => {
+      const d = c[m];
+      const r0=d[0]||0, r1=d[1]||0, r2=d[2]||0, r3=d[3]||0;
+      const t = d.total;
+      return {
+        m, t,
+        r0, r1, r2, r3,
+        p0: t>0?r0/t*100:0,
+        p1: t>0?r1/t*100:0,
+        p2: t>0?r2/t*100:0,
+        p3: t>0?r3/t*100:0,
+        cum0: t>0?r0/t*100:0,
+        cum1: t>0?(r0+r1)/t*100:0,
+        cum2: t>0?(r0+r1+r2)/t*100:0,
+        cum3: t>0?(r0+r1+r2+r3)/t*100:0,
+      };
+    });
+    return {rows, raw:c, sorted};
+  }, [rj]);
+
+  // Avg conversion curve across all cohorts with ≥2 months of data
+  const avgCurve = useMemo(() => {
+    const eligible = cohortData.rows.filter(r => r.t >= 50 && r.cum2 > 0);
+    if (!eligible.length) return {p0:0,p1:0,p2:0};
+    return {
+      p0: eligible.reduce((s,r)=>s+r.p0,0)/eligible.length,
+      p1: eligible.reduce((s,r)=>s+r.p1,0)/eligible.length,
+      p2: eligible.reduce((s,r)=>s+r.p2,0)/eligible.length,
+    };
+  }, [cohortData]);
+
+  // Lead volume trend + projection
+  const trendData = useMemo(() => {
+    const byMon = {};
+    for (const r of rj) { if (r.lead_month) byMon[r.lead_month] = (byMon[r.lead_month]||0)+1; }
+    const pts = Object.entries(byMon).sort((a,b)=>atherMonthOrder(a[0])-atherMonthOrder(b[0]));
+    if (pts.length < 2) return {pts, slope:0};
+    const n = pts.length;
+    const xs = pts.map((_,i)=>i), ys = pts.map(p=>p[1]);
+    const xBar = xs.reduce((a,b)=>a+b,0)/n, yBar = ys.reduce((a,b)=>a+b,0)/n;
+    const slope = xs.reduce((s,x,i)=>s+(x-xBar)*(ys[i]-yBar),0)/xs.reduce((s,x)=>s+(x-xBar)**2,0)||0;
+    return {pts, slope, yBar};
+  }, [rj]);
+
+  // Pipeline projection: recent unretailed leads × avg conversion curve
+  const projection = useMemo(() => {
+    const sortedM = [...months].sort((a,b)=>atherMonthOrder(a)-atherMonthOrder(b));
+    if (!sortedM.length) return null;
+    const latestM = sortedM[sortedM.length-1];
+    const prevM   = sortedM.length>1?sortedM[sortedM.length-2]:null;
+
+    // Unretailed leads in latest month (lag 0 and lag 1 potential)
+    let unretailed_cur=0, unretailed_prev=0;
+    for (const r of rj) {
+      if (!r.isBooked) {
+        if (r.lead_month===latestM) unretailed_cur++;
+        if (prevM && r.lead_month===prevM) unretailed_prev++;
+      }
+    }
+    const proj_cur_next  = Math.round(unretailed_cur  * avgCurve.p1/100);
+    const proj_prev_next = Math.round(unretailed_prev * avgCurve.p2/100);
+    const totalForecast  = proj_cur_next + proj_prev_next;
+    return { latestM, prevM, unretailed_cur, unretailed_prev, proj_cur_next, proj_prev_next, totalForecast };
+  }, [rj, months, avgCurve]);
+
+  // Auto-insights
+  const insights = useMemo(() => {
+    const msgs = [];
+    if (avgCurve.p0 > 0) {
+      msgs.push('📊 Historical conversion pattern: ' + avgCurve.p0.toFixed(1) + '% of leads retail in the same month, +' + avgCurve.p1.toFixed(1) + '% in month+1, +' + avgCurve.p2.toFixed(1) + '% in month+2. ~' + (avgCurve.p0+avgCurve.p1+avgCurve.p2).toFixed(1) + '% total retail within 3 months of lead creation.');
+    }
+    if (projection && projection.totalForecast > 0) {
+      msgs.push('🔮 Next-month pipeline projection: ~' + Nf(projection.totalForecast) + ' retails expected from existing leads (' + Nf(projection.proj_cur_next) + ' from ' + projection.latestM + ' leads at avg lag-1 rate + ' + (projection.prevM?Nf(projection.proj_prev_next)+' from '+projection.prevM+' leads at lag-2 rate':'') + '). Add to this month's new leads at lag-0 rate for total forecast.');
+    }
+    if (trendData.slope > 50) msgs.push('📈 Lead generation is trending UP at ≈+' + Math.round(trendData.slope) + ' leads/month. If conversion rates hold, retail volumes should grow proportionally.');
+    else if (trendData.slope < -50) msgs.push('📉 Lead generation is trending DOWN at ≈' + Math.round(trendData.slope) + ' leads/month. Without a correction, retail volumes will shrink even if L2R% stays constant.');
+    else msgs.push('➡️ Lead generation is relatively flat. Retail growth will need to come from L2R% improvement, not volume.');
+    const recentCohorts = cohortData.rows.filter(r=>r.t>=50).slice(-3);
+    if (recentCohorts.length >= 2) {
+      const last = recentCohorts[recentCohorts.length-1];
+      const prev = recentCohorts[recentCohorts.length-2];
+      if (last.cum1 < prev.cum1 - 0.3) msgs.push('⚠️ Recent cohort early warning: ' + last.m + ' cohort is converting slower than ' + prev.m + ' at the same lag (' + last.cum1.toFixed(1) + '% vs ' + prev.cum1.toFixed(1) + '% by month+1). This could signal deteriorating lead quality or follow-up breakdown — watch closely.');
+    }
+    return msgs;
+  }, [avgCurve, projection, trendData, cohortData]);
+
+  // Draw cohort chart
+  useEffect(() => {
+    const canvas = cohortChartRef.current;
+    if (!canvas || !window.Chart) return;
+    if (cohortInstRef.current) { try { cohortInstRef.current.destroy(); } catch(e){} }
+    const recent = cohortData.rows.filter(r=>r.t>=30).slice(-8);
+    if (!recent.length) return;
+    cohortInstRef.current = new Chart(canvas, {
+      type: 'bar',
+      data: {
+        labels: recent.map(r=>r.m),
+        datasets: [
+          { label:'Same Month (Lag 0)', data:recent.map(r=>+r.p0.toFixed(2)), backgroundColor:'#1D4ED8cc', stack:'s' },
+          { label:'Month+1 (Lag 1)',    data:recent.map(r=>+r.p1.toFixed(2)), backgroundColor:'#0891B2cc', stack:'s' },
+          { label:'Month+2 (Lag 2)',    data:recent.map(r=>+r.p2.toFixed(2)), backgroundColor:'#059669cc', stack:'s' },
+          { label:'Month+3 (Lag 3)',    data:recent.map(r=>+r.p3.toFixed(2)), backgroundColor:'#D97706cc', stack:'s' },
+        ]
+      },
+      options: {
+        responsive:true, maintainAspectRatio:false,
+        plugins:{
+          legend:{position:'top',labels:{boxWidth:10,boxHeight:10,font:{size:10,family:'DM Mono,monospace'},color:'#475569'}},
+          tooltip:{backgroundColor:'rgba(11,22,41,.92)',titleColor:'#DBEAFE',bodyColor:'#93C5FD',padding:10,cornerRadius:8,
+            callbacks:{label:ctx=>ctx.dataset.label+': '+ctx.raw+'% of cohort leads'}},
+        },
+        scales:{
+          x:{grid:{color:'rgba(100,116,139,.1)'},ticks:{color:'#475569',font:{size:10}}},
+          y:{grid:{color:'rgba(100,116,139,.1)'},ticks:{color:'#475569',font:{size:10},callback:v=>v+'%'},beginAtZero:true,
+             title:{display:true,text:'% of Cohort Leads that Retailed',color:'#94a3b8',font:{size:9}}},
+        }
+      }
+    });
+    return () => { try { if(cohortInstRef.current) cohortInstRef.current.destroy(); } catch(e){} };
+  }, [cohortData]);
+
+  return ce('div', {className:'fade-up'},
+    insights.length > 0 && ce('div', {className:'card', style:{padding:'14px 18px',marginBottom:14,background:'#F0FDF4',border:'1.5px solid #BBF7D0'}},
+      ce('div', {style:{fontWeight:700,fontSize:11,color:'#065F46',letterSpacing:.5,marginBottom:8}}, '🔮 PREDICTIVE INSIGHTS — WHAT YOUR PIPELINE SIGNALS'),
+      insights.map((msg,i) => ce('div',{key:i,style:{fontSize:12,color:'#14532D',lineHeight:1.65,marginBottom:i<insights.length-1?8:0,paddingLeft:4}},msg))
+    ),
+
+    // Projection KPIs
+    projection && ce('div', {style:{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:10,marginBottom:14}},
+      [
+        {label:'Unretailed ('+projection.latestM+')', val:Nf(projection.unretailed_cur), sub:'Leads that could still retail', color:'#1D4ED8'},
+        projection.prevM&&{label:'Unretailed ('+projection.prevM+')', val:Nf(projection.unretailed_prev), sub:'Older pipeline', color:'#7C3AED'},
+        {label:'Forecast Next Month',  val:Nf(projection.totalForecast), sub:'Pipeline-based projection', color:'#059669'},
+        {label:'Avg Conversion Curve', val:(avgCurve.p0+avgCurve.p1+avgCurve.p2).toFixed(1)+'%', sub:'Retail within 3 months of lead', color:'#D97706'},
+      ].filter(Boolean).map((k,i) => ce('div',{key:i,className:'kpi'},
+        ce('div',{style:{position:'absolute',top:0,left:0,right:0,height:3,background:k.color,borderRadius:'12px 12px 0 0'}}),
+        ce('div',{className:'kpi-label'},k.label),
+        ce('div',{className:'kpi-value kpi-med',style:{color:k.color}},k.val),
+        ce('div',{className:'kpi-sub',style:{color:k.color}},k.sub)
+      ))
+    ),
+
+    ce('div', {className:'card', style:{padding:'16px 18px',marginBottom:14}},
+      ce('div', {className:'section-title'}, 'Cohort Conversion Curve — When Do Leads Retail?'),
+      ce('div', {style:{fontSize:11,color:'#64748B',marginBottom:8}},
+        'Each bar = one lead creation month cohort. Stacked segments show what % of that cohort retailed in the same month (Lag 0), 1 month later, 2 months later, etc. Shrinking bars on recent months = incomplete data, not poor performance.'
+      ),
+      ce('div', {style:{height:240,position:'relative'}}, ce('canvas',{ref:cohortChartRef}))
+    ),
+
+    ce('div', {className:'card', style:{padding:'16px 18px',marginBottom:14}},
+      ce('div', {className:'section-title'}, 'Cohort Detail Table'),
+      ce('div', {style:{fontSize:11,color:'#64748B',marginBottom:10}}, 'Cumulative retail% shows total conversion by the end of each lag period. Use this to benchmark recent cohorts vs history.'),
+      ce('div', {className:'scroll-x'},
+        ce('table', null,
+          ce('thead', null, ce('tr', null,
+            ce('th',{className:'left'},'Cohort (Lead Month)'),
+            ce('th',null,'Total Leads'),
+            ce('th',null,'Lag-0 Retails'), ce('th',null,'Lag-0 %'),
+            ce('th',null,'Lag-1 Retails'), ce('th',null,'Lag-1 %'),
+            ce('th',null,'Lag-2 Retails'), ce('th',null,'Lag-2 %'),
+            ce('th',null,'Cumulative L2R%'),
+          )),
+          ce('tbody', null,
+            cohortData.rows.filter(r=>r.t>=10).slice(-12).map(r =>
+              ce('tr',{key:r.m},
+                ce('td',{className:'label'},r.m),
+                ce('td',null,Nf(r.t)),
+                ce('td',null,Nf(r.r0)), ce('td',null,r.p0>0?r.p0.toFixed(2)+'%':'—'),
+                ce('td',null,Nf(r.r1)), ce('td',null,r.p1>0?r.p1.toFixed(2)+'%':'—'),
+                ce('td',null,Nf(r.r2)), ce('td',null,r.p2>0?r.p2.toFixed(2)+'%':'—'),
+                ce('td',{style:{color:'#0891B2',fontWeight:700}},r.cum2>0?r.cum2.toFixed(2)+'%':'—'),
+              )
+            ),
+            ce('tr',{className:'total-row'},
+              ce('td',{className:'label',style:{color:'#1A237E'}},'∑ Avg (50+ lead cohorts)'),
+              ce('td',null,'—'),
+              ce('td',null,'—'), ce('td',null,avgCurve.p0.toFixed(2)+'%'),
+              ce('td',null,'—'), ce('td',null,avgCurve.p1.toFixed(2)+'%'),
+              ce('td',null,'—'), ce('td',null,avgCurve.p2.toFixed(2)+'%'),
+              ce('td',{style:{color:'#0891B2',fontWeight:700}},(avgCurve.p0+avgCurve.p1+avgCurve.p2).toFixed(2)+'%'),
+            )
+          )
+        )
+      )
+    ),
+
+    ce('div', {className:'card', style:{padding:'16px 18px',marginBottom:14}},
+      ce('div', {className:'section-title'}, 'Lead Generation Trend'),
+      ce('div', {style:{fontSize:11,color:'#64748B',marginBottom:10}},
+        trendData.slope > 0
+          ? 'Trending UP ≈+'+Math.abs(Math.round(trendData.slope))+' leads/month. Growth in lead volume = more retail potential, assuming conversion holds.'
+          : trendData.slope < 0
+          ? 'Trending DOWN ≈'+Math.round(trendData.slope)+' leads/month. Watch retail volumes — L2R% improvements needed to compensate.'
+          : 'Relatively flat. Retail growth must come from L2R% improvement.'
+      ),
+      ce('div', {className:'scroll-x'},
+        ce('table', null,
+          ce('thead', null, ce('tr', null,
+            ce('th',{className:'left'},'Month'),
+            ce('th',null,'Leads'),
+            ce('th',null,'MoM Change'),
+            ce('th',null,'MoM Δ%'),
+          )),
+          ce('tbody', null,
+            trendData.pts.slice(-10).map(([m,l],i,arr) => {
+              const prev = i>0?arr[i-1][1]:null;
+              const delta = prev?l-prev:null;
+              const deltaPct = prev&&prev>0?((l-prev)/prev*100):null;
+              const dc = delta===null?'#64748B':delta>0?'#059669':delta<0?'#DC2626':'#64748B';
+              return ce('tr',{key:m},
+                ce('td',{className:'label'},m),
+                ce('td',null,Nf(l)),
+                ce('td',{style:{color:dc,fontWeight:700}},delta===null?'—':(delta>0?'+':'')+Nf(delta)),
+                ce('td',{style:{color:dc,fontWeight:700}},deltaPct===null?'—':(deltaPct>0?'+':'')+deltaPct.toFixed(1)+'%'),
+              );
+            })
+          )
+        )
+      )
+    )
+  );
+});
+
+/* ════════════════════════════════════════════════════════════════════
+   ACTION PLAN TAB — Prescriptive Analytics
+   "What should we do and what will it yield?"
+   ════════════════════════════════════════════════════════════════════ */
+const ActionPlanTab = React.memo(function ActionPlanTab({ data, rawJoined, filters, months }) {
+  const rj = rawJoined || [];
+  const scatterRef = useRef(null);
+  const scatterInst = useRef(null);
+
+  // Source opportunity data
+  const srcOpp = useMemo(() => {
+    const mSet = filters.months && filters.months.size > 0 ? filters.months : new Set(months);
+    const bySrc = {}, byState = {}, byModel = {};
+    for (const r of rj) {
+      if (!mSet.has(r.lead_month)) continue;
+      const s=r.source||'Unknown', st=r.state||'Unknown', mdl=r.model||'Unknown';
+      if (!bySrc[s]) bySrc[s]={l:0,r:0};
+      bySrc[s].l++; if(r.isBooked) bySrc[s].r++;
+      if (!byState[st]) byState[st]={l:0,r:0};
+      byState[st].l++; if(r.isBooked) byState[st].r++;
+      if (!byModel[mdl]) byModel[mdl]={l:0,r:0};
+      byModel[mdl].l++; if(r.isBooked) byModel[mdl].r++;
+    }
+    let totL=0,totR=0;
+    for(const v of Object.values(bySrc)){totL+=v.l;totR+=v.r;}
+    const bench = totL>0?totR/totL*100:0;
+    const srcRows = Object.entries(bySrc)
+      .map(([s,{l,r}]) => ({s,l,r,l2r:l>0?r/l*100:0,potentialR:Math.round(l*bench/100),gap:Math.round(l*bench/100)-r}))
+      .filter(x=>x.l>=20).sort((a,b)=>b.gap-a.gap);
+    const stateRows = Object.entries(byState)
+      .map(([s,{l,r}]) => ({s,l,r,l2r:l>0?r/l*100:0,gap:Math.round(l*bench/100)-r}))
+      .filter(x=>x.l>=100).sort((a,b)=>b.gap-a.gap);
+    const modelRows = Object.entries(byModel)
+      .map(([m,{l,r}]) => ({m,l,r,l2r:l>0?r/l*100:0,vs:bench>0?(l>0?r/l*100:0)/bench*100:0}))
+      .filter(x=>x.l>=50).sort((a,b)=>b.l-a.l);
+    return { srcRows, stateRows, modelRows, bench, totL, totR };
+  }, [rj, filters, months]);
+
+  // Auto-generate top recommendations
+  const recommendations = useMemo(() => {
+    const recs = [];
+    const { srcRows, stateRows, bench } = srcOpp;
+    // Top 5 by gap (biggest missed opportunity sources)
+    srcRows.filter(x=>x.gap>0).slice(0,3).forEach(x => {
+      const adjective = x.l2r < bench*0.5 ? 'severely underperforming' : x.l2r < bench*0.75 ? 'below benchmark' : 'slightly below benchmark';
+      recs.push({
+        priority: x.gap > 100 ? 'HIGH' : x.gap > 30 ? 'MEDIUM' : 'LOW',
+        action: 'Fix ' + x.s + ' conversion',
+        detail: x.s + ' is ' + adjective + ' at ' + x.l2r.toFixed(2) + '% L2R vs ' + bench.toFixed(2) + '% benchmark. With ' + Nf(x.l) + ' leads, reaching benchmark would yield +' + Nf(x.gap) + ' more retails/period.',
+        impact: x.gap,
+        color: x.gap>100?'#DC2626':x.gap>30?'#D97706':'#0891B2',
+      });
+    });
+    // Scale up high-performers
+    const stars = srcRows.filter(x=>x.l2r>bench*1.25&&x.l>=50);
+    if (stars.length > 0) {
+      const star = stars[0];
+      const projGain = Math.round(star.l * 0.3 * star.l2r / 100);
+      recs.push({
+        priority: 'HIGH',
+        action: 'Scale up ' + star.s,
+        detail: star.s + ' converts at ' + star.l2r.toFixed(2) + '% — ' + ((star.l2r/bench-1)*100).toFixed(0) + '% above benchmark. Increasing its lead volume by 30% would add ~' + Nf(projGain) + ' retails with no conversion improvement needed.',
+        impact: projGain,
+        color: '#059669',
+      });
+    }
+    // Top geography gap
+    if (stateRows.length > 0) {
+      const st = stateRows[0];
+      recs.push({
+        priority: st.gap > 50 ? 'HIGH' : 'MEDIUM',
+        action: 'Improve ' + st.s + ' follow-up',
+        detail: st.s + ' has ' + Nf(st.l) + ' leads converting at only ' + st.l2r.toFixed(2) + '% vs ' + bench.toFixed(2) + '% benchmark. State-specific dealer intervention or follow-up protocol could recover ~' + Nf(st.gap) + ' retails/period.',
+        impact: st.gap,
+        color: '#7C3AED',
+      });
+    }
+    // Enquiry rate recommendation
+    const enqBySrc = {};
+    for (const r of rj) {
+      const s = r.source||'Unknown';
+      if (!enqBySrc[s]) enqBySrc[s]={l:0,enq:0};
+      enqBySrc[s].l++;
+      if ((r.statusName||'').trim()===ENQUIRY_STATUS) enqBySrc[s].enq++;
+    }
+    const lowEnq = Object.entries(enqBySrc)
+      .map(([s,{l,enq}])=>({s,l,enqRate:l>0?enq/l*100:0}))
+      .filter(x=>x.l>=200&&x.enqRate<1).sort((a,b)=>b.l-a.l)[0];
+    if (lowEnq) recs.push({
+      priority:'MEDIUM',
+      action:'Improve enquiry rate for ' + lowEnq.s,
+      detail:lowEnq.s+' has a very low enquiry rate ('+lowEnq.enqRate.toFixed(2)+'% of leads reach "'+ENQUIRY_STATUS+'" status). This suggests leads are not being worked — a dedicated callback SLA for this source could unlock conversion upstream.',
+      impact:0,
+      color:'#0369A1',
+    });
+    return recs.sort((a,b)=>b.impact-a.impact);
+  }, [srcOpp, rj]);
+
+  // Draw scatter chart
+  useEffect(() => {
+    const canvas = scatterRef.current;
+    if (!canvas || !window.Chart) return;
+    if (scatterInst.current) { try { scatterInst.current.destroy(); } catch(e){} }
+    const pts = srcOpp.srcRows.filter(x=>x.l>=30).map(x=>({x:x.l, y:+x.l2r.toFixed(3), label:x.s, r:x.r}));
+    const bench = srcOpp.bench;
+    scatterInst.current = new Chart(canvas, {
+      type:'scatter',
+      data:{datasets:[{
+        label:'Sources',
+        data: pts.map(p=>({x:p.x,y:p.y})),
+        backgroundColor: pts.map(p=>p.y>=bench?'#059669cc':p.y>=bench*0.75?'#D97706cc':'#DC2626cc'),
+        pointRadius: pts.map(p=>Math.max(6,Math.min(18,Math.sqrt(p.r)*2))),
+        pointHoverRadius: pts.map(p=>Math.max(8,Math.min(22,Math.sqrt(p.r)*2+2))),
+      }]},
+      options:{
+        responsive:true, maintainAspectRatio:false,
+        plugins:{
+          legend:{display:false},
+          tooltip:{backgroundColor:'rgba(11,22,41,.92)',titleColor:'#DBEAFE',bodyColor:'#93C5FD',padding:10,cornerRadius:8,
+            callbacks:{
+              title: items => pts[items[0].dataIndex]?.label||'',
+              label: item => ['Leads: '+Nf(Math.round(item.raw.x)),'L2R%: '+item.raw.y.toFixed(2)+'%','vs benchmark: '+(item.raw.y/bench*100-100).toFixed(0)+'%'],
+            }},
+          annotation:{ annotations:{
+            hLine:{type:'line',yMin:bench,yMax:bench,borderColor:'#1D4ED8',borderWidth:1.5,borderDash:[4,4],
+              label:{content:'Benchmark '+bench.toFixed(2)+'%',enabled:true,position:'start',color:'#1D4ED8',font:{size:10}}},
+          }},
+        },
+        scales:{
+          x:{grid:{color:'rgba(100,116,139,.1)'},ticks:{color:'#475569',font:{size:10}},
+             title:{display:true,text:'Lead Volume',color:'#94a3b8',font:{size:9}}},
+          y:{grid:{color:'rgba(100,116,139,.1)'},ticks:{color:'#475569',font:{size:10},callback:v=>v+'%'},beginAtZero:true,
+             title:{display:true,text:'L2R%',color:'#94a3b8',font:{size:9}}},
+        }
+      }
+    });
+    return () => { try { if(scatterInst.current) scatterInst.current.destroy(); } catch(e){} };
+  }, [srcOpp]);
+
+  const totalGap = srcOpp.srcRows.filter(x=>x.gap>0).reduce((s,x)=>s+x.gap,0);
+
+  return ce('div', {className:'fade-up'},
+    // Insight headline
+    ce('div', {className:'card', style:{padding:'14px 18px',marginBottom:14,background:'#FFF7ED',border:'1.5px solid #FED7AA'}},
+      ce('div', {style:{fontWeight:700,fontSize:11,color:'#92400E',letterSpacing:.5,marginBottom:8}}, '🎯 PRESCRIPTIVE ACTION PLAN — RANKED BY RETAIL IMPACT'),
+      ce('div', {style:{fontSize:12,color:'#78350F',lineHeight:1.65,marginBottom:8}},
+        'If all sources reached the benchmark L2R% of ' + srcOpp.bench.toFixed(2) + '%, this period's retails would increase by ' + Nf(totalGap) + '. Below are the highest-impact actions, in priority order.'
+      ),
+      recommendations.map((rec,i) => ce('div', {key:i, style:{marginBottom:i<recommendations.length-1?12:0,paddingLeft:0}},
+        ce('div', {style:{display:'flex',alignItems:'center',gap:8,marginBottom:3}},
+          ce('span', {style:{fontSize:9,fontWeight:900,padding:'2px 7px',borderRadius:10,background:rec.color,color:'#fff',letterSpacing:.5}}, rec.priority),
+          ce('span', {style:{fontSize:12,fontWeight:700,color:'#1C1917'}}, rec.action),
+          rec.impact>0&&ce('span',{style:{fontSize:10,color:rec.color,fontWeight:700}},'(+'+Nf(rec.impact)+' retails)')
+        ),
+        ce('div', {style:{fontSize:11,color:'#44403C',lineHeight:1.55,paddingLeft:8}}, rec.detail)
+      ))
+    ),
+
+    // Opportunity Matrix chart
+    ce('div', {className:'card', style:{padding:'16px 18px',marginBottom:14}},
+      ce('div', {className:'section-title'}, 'Source Opportunity Matrix'),
+      ce('div', {style:{fontSize:11,color:'#64748B',marginBottom:6}},
+        'X = Lead Volume, Y = L2R%. Bubble size = retails achieved. Blue dashed line = benchmark. 🟢 Above benchmark · 🟡 Near benchmark · 🔴 Below benchmark'
+      ),
+      ce('div', {style:{display:'grid',gridTemplateColumns:'1fr auto',gap:8,alignItems:'start',marginBottom:4}},
+        ce('div',{style:{fontSize:10,color:'#94A3B8',textAlign:'right',fontStyle:'italic'}}, '← Low Volume | High Volume →'),
+        ce('div',{style:{fontSize:10,color:'#94A3B8',fontStyle:'italic'}}, '↑ High L2R%')
+      ),
+      ce('div', {style:{height:260,position:'relative'}}, ce('canvas',{ref:scatterRef}))
+    ),
+
+    // Impact sizing table
+    ce('div', {className:'card', style:{padding:'16px 18px',marginBottom:14}},
+      ce('div', {className:'section-title'}, 'Retail Uplift Opportunity by Source'),
+      ce('div', {style:{fontSize:11,color:'#64748B',marginBottom:10}},
+        '"Potential at Benchmark" = leads × benchmark L2R%. "Gap" = additional retails if this source reaches benchmark. Sources sorted by gap (highest opportunity first).'
+      ),
+      ce('div', {className:'scroll-x'},
+        ce('table', null,
+          ce('thead', null, ce('tr', null,
+            ce('th',{className:'left'},'Source'),
+            ce('th',null,'Leads'), ce('th',null,'Actual Retails'), ce('th',null,'Actual L2R%'),
+            ce('th',null,'Benchmark L2R%'), ce('th',null,'Potential Retails'), ce('th',null,'Gap (Uplift)'),
+            ce('th',null,'Priority'),
+          )),
+          ce('tbody', null,
+            srcOpp.srcRows.slice(0,12).map(x => {
+              const prio = x.gap>100?'HIGH':x.gap>30?'MEDIUM':'LOW';
+              const pc = x.gap>100?'#DC2626':x.gap>30?'#D97706':'#059669';
+              return ce('tr',{key:x.s},
+                ce('td',{className:'label'},x.s),
+                ce('td',null,Nf(x.l)),
+                ce('td',{style:{color:'#0891B2',fontWeight:700}},Nf(x.r)),
+                ce('td',{style:{color:x.l2r<srcOpp.bench?'#DC2626':'#059669',fontWeight:700}},x.l2r.toFixed(2)+'%'),
+                ce('td',{style:{color:'#1D4ED8',fontWeight:700}},srcOpp.bench.toFixed(2)+'%'),
+                ce('td',null,Nf(x.potentialR)),
+                ce('td',{style:{color:x.gap>0?'#059669':'#94A3B8',fontWeight:700}},x.gap>0?'+'+Nf(x.gap):'—'),
+                ce('td',{style:{color:pc,fontWeight:700}},prio),
+              );
+            }),
+            ce('tr',{className:'total-row'},
+              ce('td',{className:'label',style:{color:'#1A237E'}},'∑ Total Opportunity'),
+              ce('td',null,Nf(srcOpp.totL)),
+              ce('td',{style:{color:'#0891B2',fontWeight:700}},Nf(srcOpp.totR)),
+              ce('td',{style:{color:'#D97706',fontWeight:700}},srcOpp.bench.toFixed(2)+'%'),
+              ce('td',null,'—'),
+              ce('td',null,'—'),
+              ce('td',{style:{color:'#059669',fontWeight:700}},'+'+Nf(totalGap)),
+              ce('td',null,'—'),
+            )
+          )
+        )
+      )
+    ),
+
+    // Geography table
+    srcOpp.stateRows.length > 0 && ce('div', {className:'card', style:{padding:'16px 18px',marginBottom:14}},
+      ce('div', {className:'section-title'}, 'Geographic Opportunity — States Below Benchmark'),
+      ce('div', {style:{fontSize:11,color:'#64748B',marginBottom:10}},
+        'States with significant lead volumes but below-benchmark conversion. A targeted dealer intervention or follow-up protocol in these states has the highest geographic impact.'
+      ),
+      ce('div', {className:'scroll-x'},
+        ce('table', null,
+          ce('thead', null, ce('tr', null,
+            ce('th',{className:'left'},'State'),
+            ce('th',null,'Leads'), ce('th',null,'Retails'), ce('th',null,'L2R%'),
+            ce('th',null,'vs Benchmark'), ce('th',null,'Uplift Opportunity'),
+          )),
+          ce('tbody', null,
+            srcOpp.stateRows.slice(0,12).map(x => {
+              const vsB = srcOpp.bench>0?x.l2r/srcOpp.bench*100:0;
+              const dc = x.l2r>=srcOpp.bench?'#059669':x.l2r>=srcOpp.bench*0.75?'#D97706':'#DC2626';
+              return ce('tr',{key:x.s},
+                ce('td',{className:'label'},x.s),
+                ce('td',null,Nf(x.l)),
+                ce('td',{style:{color:'#0891B2',fontWeight:700}},Nf(x.r)),
+                ce('td',{style:{color:dc,fontWeight:700}},x.l2r.toFixed(2)+'%'),
+                ce('td',{style:{color:dc,fontWeight:700}},vsB.toFixed(0)+'% of benchmark'),
+                ce('td',{style:{color:x.gap>0?'#059669':'#94A3B8',fontWeight:700}},x.gap>0?'+'+Nf(x.gap)+' retails':'at benchmark'),
+              );
+            })
+          )
+        )
+      )
+    )
+  );
+});
+
+/* ════════════════════════════════════════════════════════════════════
    APP ROOT — Ather LDR Dashboard
    ════════════════════════════════════════════════════════════════════ */
 const FONT_STEPS=[0.85,0.90,0.95,1.00,1.05,1.10,1.15,1.20,1.25];
@@ -4050,6 +4768,9 @@ const TABS = [
   { id:'statexsrc',       label:'State Performance' },
   { id:'geodealer',       label:'Geo & Dealer' },
   { id:'pivot',           label:'Pivot Table' },
+  { id:'diagnosis',       label:'Diagnosis' },
+  { id:'forecast',        label:'Forecast' },
+  { id:'actionplan',      label:'Action Plan' },
 ];
 
 function App({fbUser,role,presence,onSignOut,onAdminOpen}){
@@ -4434,6 +5155,9 @@ function App({fbUser,role,presence,onSignOut,onAdminOpen}){
       case 'cityxmodel':  return ce(CityModelTab,     props);
       case 'geodealer':       return ce(GeoAndDealerTab,      {...props,rawJoined,leadsMode});
       case 'pivot':       return ce(PivotTab,         {...props,rawJoined,leadsMode});
+      case 'diagnosis':   return ce(DiagnosisTab,   {...props,rawJoined});
+      case 'forecast':    return ce(ForecastTab,    {...props,rawJoined});
+      case 'actionplan':  return ce(ActionPlanTab,  {...props,rawJoined});
       default: return null;
     }
   },[tab,data,effectiveData,filters,months,RT,viewerMode,clientMode,onDetailedCsv,rawJoined,leadsMode,nsRetailRows]);
