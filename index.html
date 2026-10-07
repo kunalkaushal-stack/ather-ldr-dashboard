@@ -1854,6 +1854,16 @@ const DimGrid = React.memo(function DimGrid({
         if (sk==='l') { av=da.total.l; bv=db.total.l; }
         else if (sk==='r') { av=da.total.r; bv=db.total.r; }
         else if (sk==='l2r') { av=da.total.l2r; bv=db.total.l2r; }
+        else if (sk.includes(':')) {
+          const [colId,metric]=sk.split(':');
+          const col=visibleCols.find(c=>c.id===colId);
+          if(col){
+            const aA=grpSum(da.src,col.srcs),aB=grpSum(db.src,col.srcs);
+            if(metric==='l'){av=aA.l;bv=aB.l;}
+            else if(metric==='r'){av=aA.r;bv=aB.r;}
+            else if(metric==='l2r'){av=aA.l2r;bv=aB.l2r;}
+          }
+        }
         return sAsc ? av-bv : bv-av;
       });
 
@@ -1894,13 +1904,17 @@ const DimGrid = React.memo(function DimGrid({
     ce('th', { key:'tr', className:'sub', style:sortThSt('r'), onClick:()=>toggleSort('r'), title:'Sort by Retail' }, 'Retail'+sortArrow('r')),
     ce('th', { key:'trc', className:'sub' }, 'R.Contrib%'),
     ce('th', { key:'tl2r', className:'sub', style:sortThSt('l2r'), onClick:()=>toggleSort('l2r'), title:'Sort by L2R%' }, 'L2R%'+sortArrow('l2r')),
-    ...(viewerMode ? [] : visibleCols.flatMap(col => [
-      ce('th', { key:col.id+'l', className:'sub', style: col.borderLeft ? {borderLeft:col.borderLeft} : {} }, 'Leads'),
-      ce('th', { key:col.id+'lc', className:'sub' }, 'L.Contrib%'),
-      ce('th', { key:col.id+'r', className:'sub' }, 'Retail'),
-      ce('th', { key:col.id+'rc', className:'sub' }, 'R.Contrib%'),
-      ce('th', { key:col.id+'l2r', className:'sub' }, 'L2R%'),
-    ]))
+    ...(viewerMode ? [] : visibleCols.flatMap(col => {
+      const kl=col.id+':l',kr=col.id+':r',kl2r=col.id+':l2r';
+      const bl=col.borderLeft?{borderLeft:col.borderLeft}:{};
+      return [
+        ce('th',{key:col.id+'l',className:'sub',style:{...bl,...sortThSt(kl)},onClick:()=>toggleSort(kl),title:'Sort by Leads'},'Leads'+sortArrow(kl)),
+        ce('th',{key:col.id+'lc',className:'sub'},'L.Contrib%'),
+        ce('th',{key:col.id+'r',className:'sub',style:sortThSt(kr),onClick:()=>toggleSort(kr),title:'Sort by Retail'},'Retail'+sortArrow(kr)),
+        ce('th',{key:col.id+'rc',className:'sub'},'R.Contrib%'),
+        ce('th',{key:col.id+'l2r',className:'sub',style:sortThSt(kl2r),onClick:()=>toggleSort(kl2r),title:'Sort by L2R%'},'L2R%'+sortArrow(kl2r)),
+      ];
+    }))
   ];
 
   const rows = [];
