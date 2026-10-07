@@ -4120,7 +4120,7 @@ const DiagnosisTab = React.memo(function DiagnosisTab({ data, rawJoined, filters
         {name:'Booking', drop:enq>0?(enq-bookings)/enq*100:0, from:'Enquiries'},
         {name:'Retail',  drop:bookings>0?(bookings-retails)/Math.max(bookings,1)*100:0, from:'Bookings'},
       ].sort((a,b)=>b.drop-a.drop);
-      msgs.push('🔍 Biggest funnel leak: ' + stages[0].drop.toFixed(0) + '% of ' + stages[0].from + ' don't reach ' + stages[0].name + '. Fixing this stage will have the highest impact on retails.');
+      msgs.push('🔍 Biggest funnel leak: ' + stages[0].drop.toFixed(0) + '% of ' + stages[0].from + ' don\'t reach ' + stages[0].name + '. Fixing this stage will have the highest impact on retails.');
     }
     const underPerf = srcStats.rows.filter(x=>x.l>=100&&x.vs<75);
     if (underPerf.length > 0) {
@@ -4158,7 +4158,7 @@ const DiagnosisTab = React.memo(function DiagnosisTab({ data, rawJoined, filters
     ce('div', {style:{display:'grid',gridTemplateColumns:'1fr 1fr',gap:14,marginBottom:14}},
       ce('div', {className:'card', style:{padding:'16px 18px'}},
         ce('div', {className:'section-title'}, 'Conversion Funnel'),
-        ce('div', {style:{fontSize:10,color:'#64748B',marginBottom:12}}, 'Every lead's journey from entry to retail. Each drop-off percentage is a conversion problem.'),
+        ce('div', {style:{fontSize:10,color:'#64748B',marginBottom:12}}, 'Every lead\'s journey from entry to retail. Each drop-off percentage is a conversion problem.'),
         ce('div', {style:{display:'flex',gap:6,alignItems:'flex-end',height:130}},
           funnelStages.map((s,i,arr) => {
             const pct = s.val/fMax;
@@ -4355,7 +4355,7 @@ const ForecastTab = React.memo(function ForecastTab({ data, rawJoined, filters, 
       msgs.push('📊 Historical conversion pattern: ' + avgCurve.p0.toFixed(1) + '% of leads retail in the same month, +' + avgCurve.p1.toFixed(1) + '% in month+1, +' + avgCurve.p2.toFixed(1) + '% in month+2. ~' + (avgCurve.p0+avgCurve.p1+avgCurve.p2).toFixed(1) + '% total retail within 3 months of lead creation.');
     }
     if (projection && projection.totalForecast > 0) {
-      msgs.push('🔮 Next-month pipeline projection: ~' + Nf(projection.totalForecast) + ' retails expected from existing leads (' + Nf(projection.proj_cur_next) + ' from ' + projection.latestM + ' leads at avg lag-1 rate + ' + (projection.prevM?Nf(projection.proj_prev_next)+' from '+projection.prevM+' leads at lag-2 rate':'') + '). Add to this month's new leads at lag-0 rate for total forecast.');
+      msgs.push('🔮 Next-month pipeline projection: ~' + Nf(projection.totalForecast) + ' retails expected from existing leads (' + Nf(projection.proj_cur_next) + ' from ' + projection.latestM + ' leads at avg lag-1 rate + ' + (projection.prevM?Nf(projection.proj_prev_next)+' from '+projection.prevM+' leads at lag-2 rate':'') + '). Add to this month\'s new leads at lag-0 rate for total forecast.');
     }
     if (trendData.slope > 50) msgs.push('📈 Lead generation is trending UP at ≈+' + Math.round(trendData.slope) + ' leads/month. If conversion rates hold, retail volumes should grow proportionally.');
     else if (trendData.slope < -50) msgs.push('📉 Lead generation is trending DOWN at ≈' + Math.round(trendData.slope) + ' leads/month. Without a correction, retail volumes will shrink even if L2R% stays constant.');
@@ -4653,7 +4653,7 @@ const ActionPlanTab = React.memo(function ActionPlanTab({ data, rawJoined, filte
     ce('div', {className:'card', style:{padding:'14px 18px',marginBottom:14,background:'#FFF7ED',border:'1.5px solid #FED7AA'}},
       ce('div', {style:{fontWeight:700,fontSize:11,color:'#92400E',letterSpacing:.5,marginBottom:8}}, '🎯 PRESCRIPTIVE ACTION PLAN — RANKED BY RETAIL IMPACT'),
       ce('div', {style:{fontSize:12,color:'#78350F',lineHeight:1.65,marginBottom:8}},
-        'If all sources reached the benchmark L2R% of ' + srcOpp.bench.toFixed(2) + '%, this period's retails would increase by ' + Nf(totalGap) + '. Below are the highest-impact actions, in priority order.'
+        'If all sources reached the benchmark L2R% of ' + srcOpp.bench.toFixed(2) + '%, this period\'s retails would increase by ' + Nf(totalGap) + '. Below are the highest-impact actions, in priority order.'
       ),
       recommendations.map((rec,i) => ce('div', {key:i, style:{marginBottom:i<recommendations.length-1?12:0,paddingLeft:0}},
         ce('div', {style:{display:'flex',alignItems:'center',gap:8,marginBottom:3}},
