@@ -4041,16 +4041,35 @@ const CityModelTab   = function(){ return null; };
    DIAGNOSIS TAB — Diagnostic Analytics
    "Why is performance where it is?"
    ════════════════════════════════════════════════════════════════════ */
+// Applies ALL active dimension filters (month, source, model, state, city, leadType)
+// to a rawJoined record. months[] is pre-filtered by the App component.
+function makeRjFilter(filters, months) {
+  const mSet = new Set(months);
+  const sf  = filters.sources;   const allS    = !sf  || sf.size  === 0;
+  const ltf = filters.leadTypes; const allLT   = !ltf || ltf.size === 0;
+  const mdf = filters.models;    const allMdl  = !mdf || mdf.size === 0;
+  const stf = filters.states;    const allSt   = !stf || stf.size === 0;
+  const cf  = filters.cities;    const allCity = !cf  || cf.size  === 0;
+  return function(r) {
+    if (!mSet.has(r.lead_month)) return false;
+    if (!allS    && (sf  === FILTER_CLEARED || !sf.has(r.source)))  return false;
+    if (!allLT   && (ltf === FILTER_CLEARED || !ltf.has(r.lt)))     return false;
+    if (!allMdl  && (mdf === FILTER_CLEARED || !mdf.has(r.model)))  return false;
+    if (!allSt   && (stf === FILTER_CLEARED || !stf.has(r.state)))  return false;
+    if (!allCity && (cf  === FILTER_CLEARED || !cf.has(r.city)))    return false;
+    return true;
+  };
+}
+
 const DiagnosisTab = React.memo(function DiagnosisTab({ data, rawJoined, filters, months }) {
   const rj = rawJoined || [];
-  function mSet_() { return filters.months && filters.months.size > 0 ? filters.months : new Set(months); }
 
   const srcStats = useMemo(() => {
-    const mSet = mSet_();
+    const keep = makeRjFilter(filters, months);
     const bySrc = {};
     const byMon = {};
     for (const r of rj) {
-      if (!mSet.has(r.lead_month)) continue;
+      if (!keep(r)) continue;
       const s = r.source || 'Unknown';
       const m = r.lead_month;
       if (!bySrc[s]) bySrc[s] = {l:0,r:0};
@@ -4071,15 +4090,16 @@ const DiagnosisTab = React.memo(function DiagnosisTab({ data, rawJoined, filters
   }, [rj, filters, months]);
 
   const funnel = useMemo(() => {
-    const mSet = mSet_();
+    const keep = makeRjFilter(filters, months);
     let leads=0, enq=0, bookings=0;
     for (const r of rj) {
-      if (!mSet.has(r.lead_month)) continue;
+      if (!keep(r)) continue;
       leads++;
       if ((r.statusName||'').trim() === ENQUIRY_STATUS) enq++;
       if (r.isBooked) bookings++;
     }
     const arbm = data.atherRetailByMonth || {};
+    const mSet = new Set(months);
     let retails = 0;
     for (const [m,cnt] of Object.entries(arbm)) { if (mSet.has(m)) retails += cnt; }
     return { leads, enq, bookings, retails };
@@ -4100,10 +4120,10 @@ const DiagnosisTab = React.memo(function DiagnosisTab({ data, rawJoined, filters
   }, [srcStats, months]);
 
   const statusDist = useMemo(() => {
-    const mSet = mSet_();
+    const keep = makeRjFilter(filters, months);
     const st = {};
     for (const r of rj) {
-      if (!mSet.has(r.lead_month)) continue;
+      if (!keep(r)) continue;
       if (r.isBooked) continue;
       const status = (r.statusName||'').trim() || 'Not Updated';
       st[status] = (st[status]||0) + 1;
@@ -4270,8 +4290,10 @@ const ForecastTab = React.memo(function ForecastTab({ data, rawJoined, filters, 
 
   // Cohort: for each lead_month, how many retailed in +0, +1, +2 months
   const cohortData = useMemo(() => {
+    const keep = makeRjFilter(filters, months);
     const c = {}; // {lm: {total, 0:n, 1:n, 2:n, 3:n}}
     for (const r of rj) {
+      if (!keep(r)) continue;
       const lm = r.lead_month;
       if (!lm) continue;
       if (!c[lm]) c[lm] = {total:0};
@@ -4301,7 +4323,7 @@ const ForecastTab = React.memo(function ForecastTab({ data, rawJoined, filters, 
       };
     });
     return {rows, raw:c, sorted};
-  }, [rj]);
+  }, [rj, filters, months]);
 
   // Avg conversion curve across all cohorts with ≥2 months of data
   const avgCurve = useMemo(() => {
@@ -4316,8 +4338,12 @@ const ForecastTab = React.memo(function ForecastTab({ data, rawJoined, filters, 
 
   // Lead volume trend + projection
   const trendData = useMemo(() => {
+    const keep = makeRjFilter(filters, months);
     const byMon = {};
-    for (const r of rj) { if (r.lead_month) byMon[r.lead_month] = (byMon[r.lead_month]||0)+1; }
+    for (const r of rj) {
+      if (!keep(r)) continue;
+      if (r.lead_month) byMon[r.lead_month] = (byMon[r.lead_month]||0)+1;
+    }
     const pts = Object.entries(byMon).sort((a,b)=>atherMonthOrder(a[0])-atherMonthOrder(b[0]));
     if (pts.length < 2) return {pts, slope:0};
     const n = pts.length;
@@ -4325,7 +4351,7 @@ const ForecastTab = React.memo(function ForecastTab({ data, rawJoined, filters, 
     const xBar = xs.reduce((a,b)=>a+b,0)/n, yBar = ys.reduce((a,b)=>a+b,0)/n;
     const slope = xs.reduce((s,x,i)=>s+(x-xBar)*(ys[i]-yBar),0)/xs.reduce((s,x)=>s+(x-xBar)**2,0)||0;
     return {pts, slope, yBar};
-  }, [rj]);
+  }, [rj, filters, months]);
 
   // Pipeline projection: recent unretailed leads × avg conversion curve
   const projection = useMemo(() => {
@@ -4334,9 +4360,11 @@ const ForecastTab = React.memo(function ForecastTab({ data, rawJoined, filters, 
     const latestM = sortedM[sortedM.length-1];
     const prevM   = sortedM.length>1?sortedM[sortedM.length-2]:null;
 
+    const keep = makeRjFilter(filters, months);
     // Unretailed leads in latest month (lag 0 and lag 1 potential)
     let unretailed_cur=0, unretailed_prev=0;
     for (const r of rj) {
+      if (!keep(r)) continue;
       if (!r.isBooked) {
         if (r.lead_month===latestM) unretailed_cur++;
         if (prevM && r.lead_month===prevM) unretailed_prev++;
@@ -4518,10 +4546,10 @@ const ActionPlanTab = React.memo(function ActionPlanTab({ data, rawJoined, filte
 
   // Source opportunity data
   const srcOpp = useMemo(() => {
-    const mSet = filters.months && filters.months.size > 0 ? filters.months : new Set(months);
+    const keep = makeRjFilter(filters, months);
     const bySrc = {}, byState = {}, byModel = {};
     for (const r of rj) {
-      if (!mSet.has(r.lead_month)) continue;
+      if (!keep(r)) continue;
       const s=r.source||'Unknown', st=r.state||'Unknown', mdl=r.model||'Unknown';
       if (!bySrc[s]) bySrc[s]={l:0,r:0};
       bySrc[s].l++; if(r.isBooked) bySrc[s].r++;
@@ -4585,8 +4613,10 @@ const ActionPlanTab = React.memo(function ActionPlanTab({ data, rawJoined, filte
       });
     }
     // Enquiry rate recommendation
+    const keepR = makeRjFilter(filters, months);
     const enqBySrc = {};
     for (const r of rj) {
+      if (!keepR(r)) continue;
       const s = r.source||'Unknown';
       if (!enqBySrc[s]) enqBySrc[s]={l:0,enq:0};
       enqBySrc[s].l++;
@@ -4603,7 +4633,7 @@ const ActionPlanTab = React.memo(function ActionPlanTab({ data, rawJoined, filte
       color:'#0369A1',
     });
     return recs.sort((a,b)=>b.impact-a.impact);
-  }, [srcOpp, rj]);
+  }, [srcOpp, rj, filters, months]);
 
   // Draw scatter chart
   useEffect(() => {
