@@ -2805,6 +2805,7 @@ const SourceTab = React.memo(function SourceTab({ data, rawData, filters, months
       else if(srcTabSK==='l2r'){av=al>0?ar/al:0;bv=bl>0?br/bl:0;}
       else if(srcTabSK==='nr'){av=nrBySrc.get(ak)||0;bv=nrBySrc.get(bk)||0;}
       else if(srcTabSK==='nb'){av=nbBySrc.get(ak)||0;bv=nbBySrc.get(bk)||0;}
+      else if(srcTabSK==='tr'){av=ar+(nbBySrc.get(ak)||0);bv=br+(nbBySrc.get(bk)||0);}
       return srcTabAsc?av-bv:bv-av;
     });
     const sorted = sortedEntries;
@@ -2815,9 +2816,9 @@ const SourceTab = React.memo(function SourceTab({ data, rawData, filters, months
         ce('div', { className:'section-title', style:{marginBottom:0} }, M),
         ce('div',{style:{display:'flex',gap:0}},
           viewerMode ? ce(ViewerCsvGate,null) : ce(CsvBtn, { onClick:()=>{
-            const aoa=[['Source','Leads','Enquiries','Retail','L.Contrib%','L2R%','Ineligible Retails','Retail from Non BD Leads']];
-            csvSorted.forEach(([src,[l,r]])=>{const tot=fin(l,r);aoa.push([src,tot.l,enqBySrc.get(src)||0,tot.r,gL>0?+(tot.l/gL*100).toFixed(1):0,+tot.l2r.toFixed(1),nrBySrc.get(src)||0,nbBySrc.get(src)||0]);});
-            aoa.push(['Grand Total',gL,gEnq,gR,100,gL>0?+(gR/gL*100).toFixed(1):0,gNR,gNB]);
+            const aoa=[['Source','Leads','Enquiries','Total Retail','Retail','Retail from Non BD Leads','L.Contrib%','L2R%','Ineligible Retails']];
+            csvSorted.forEach(([src,[l,r]])=>{const tot=fin(l,r);aoa.push([src,tot.l,enqBySrc.get(src)||0,tot.r+(nbBySrc.get(src)||0),tot.r,nbBySrc.get(src)||0,gL>0?+(tot.l/gL*100).toFixed(1):0,+tot.l2r.toFixed(1),nrBySrc.get(src)||0]);});
+            aoa.push(['Grand Total',gL,gEnq,gR+gNB,gR,gNB,100,gL>0?+(gR/gL*100).toFixed(1):0,gNR]);
             exportCsv(aoa,'RE_Source_'+M.replace(/[^a-z0-9]/gi,'_')+'.csv');
           }}),
           !viewerMode && onDetailedCsv && ce(DetailedCsvBtn, { onClick:()=>onDetailedCsv('Source', M) })
@@ -2831,11 +2832,12 @@ const SourceTab = React.memo(function SourceTab({ data, rawData, filters, months
               ce('th',{style:{cursor:'pointer'},onClick:()=>toggleSrcSort('l')},'Leads'+srcSortArrow('l')),
               ce('th',{style:{cursor:'pointer'},onClick:()=>toggleSrcSort('enq')},'Enquiries'+srcSortArrow('enq')),
               ce('th',null,'L.Contrib%'),
+              ce('th',{style:{cursor:'pointer'},onClick:()=>toggleSrcSort('tr')},'Total Retail'+srcSortArrow('tr')),
               ce('th',{style:{cursor:'pointer'},onClick:()=>toggleSrcSort('r')},'Retail'+srcSortArrow('r')),
+              ce('th',{style:{color:'#fff',cursor:'pointer'},onClick:()=>toggleSrcSort('nb')},'Retail from Non BD Leads'+srcSortArrow('nb')),
               ce('th',null,'R.Contrib%'),
               ce('th',{style:{cursor:'pointer'},onClick:()=>toggleSrcSort('l2r')},'L2R%'+srcSortArrow('l2r')),
               ce('th',{style:{color:'#fff',cursor:'pointer'},onClick:()=>toggleSrcSort('nr')},'Ineligible Retails'+srcSortArrow('nr')),
-              ce('th',{style:{color:'#fff',cursor:'pointer'},onClick:()=>toggleSrcSort('nb')},'Retail from Non BD Leads'+srcSortArrow('nb')),
             )
           ),
           ce('tbody', null,
@@ -2846,11 +2848,12 @@ const SourceTab = React.memo(function SourceTab({ data, rawData, filters, months
                 ce('td',null,Nf(tot.l)),
                 ce('td',null,Nf(enqBySrc.get(src)||0)),
                 ce('td',null,gL>0?Pf(tot.l/gL*100):'—'),
+                ce('td',{style:{color:'#1E3A8A',fontWeight:800}},Nf(tot.r+(nbBySrc.get(src)||0))),
                 ce('td',{style:{color:'#0891B2',fontWeight:700}},Nf(tot.r)),
+                ce('td',{style:{color:'#0F766E',fontWeight:700}},Nf(nbBySrc.get(src)||0)),
                 ce('td',null,gR>0?Pf(tot.r/gR*100):'—'),
                 ce('td',{style:{color:'#D97706',fontWeight:700}},tot.l2r>0?Pf(tot.l2r):'—'),
                 ce('td',{style:{color:'#7C3AED',fontWeight:700}},Nf(nrBySrc.get(src)||0)),
-                ce('td',{style:{color:'#0F766E',fontWeight:700}},Nf(nbBySrc.get(src)||0)),
               );
             }),
             ce('tr',{key:'gtotal',className:'total-row'},
@@ -2858,11 +2861,12 @@ const SourceTab = React.memo(function SourceTab({ data, rawData, filters, months
               ce('td',null,Nf(grand.l)),
               ce('td',null,Nf(gEnq)),
               ce('td',null,'100.0%'),
+              ce('td',{style:{color:'#1E3A8A',fontWeight:800}},Nf(grand.r+gNB)),
               ce('td',{style:{color:'#0891B2',fontWeight:700}},Nf(grand.r)),
+              ce('td',{style:{color:'#0F766E',fontWeight:700}},Nf(gNB)),
               ce('td',null,'100.0%'),
               ce('td',{style:{color:'#D97706',fontWeight:700}},grand.l2r>0?Pf(grand.l2r):'—'),
               ce('td',{style:{color:'#7C3AED',fontWeight:700}},Nf(gNR)),
-              ce('td',{style:{color:'#0F766E',fontWeight:700}},Nf(gNB)),
             )
           )
         )
@@ -3011,6 +3015,7 @@ const SourceTab = React.memo(function SourceTab({ data, rawData, filters, months
       else if(srcTabSK==='l2r'){av=al>0?ar/al:0;bv=bl>0?br/bl:0;}
       else if(srcTabSK==='nr'){av=nrs.get(ak)||0;bv=nrs.get(bk)||0;}
       else if(srcTabSK==='nb'){av=nbs.get(ak)||0;bv=nbs.get(bk)||0;}
+      else if(srcTabSK==='tr'){av=ar+(nbs.get(ak)||0);bv=br+(nbs.get(bk)||0);}
       return srcTabAsc?av-bv:bv-av;
     });
     return s;
@@ -3022,9 +3027,9 @@ const SourceTab = React.memo(function SourceTab({ data, rawData, filters, months
         ce('div', { className:'section-title', style:{marginBottom:0} }, '∑ All Months — Source Summary'),
         ce('div',{style:{display:'flex',gap:0}},
           viewerMode ? ce(ViewerCsvGate,null) : ce(CsvBtn, { onClick:()=>{
-            const aoa=[['Source','Leads','Enquiries','Retail','L.Contrib%','L2R%','Ineligible Retails','Retail from Non BD Leads']];
-            crossMonthTotals.sorted.forEach(([src,[l,r]])=>{const tot=fin(l,r);aoa.push([src,tot.l,crossMonthTotals.enqBySrc.get(src)||0,tot.r,crossMonthTotals.l>0?+(tot.l/crossMonthTotals.l*100).toFixed(1):0,+tot.l2r.toFixed(1),crossMonthTotals.nrBySrc.get(src)||0,crossMonthTotals.nbBySrc.get(src)||0]);});
-            aoa.push(['Grand Total',crossMonthTotals.l,crossMonthTotals.gEnq,crossMonthTotals.r,100,+crossMonthTotals.l2r.toFixed(1),crossMonthTotals.gNR,crossMonthTotals.gNB]);
+            const aoa=[['Source','Leads','Enquiries','Total Retail','Retail','Retail from Non BD Leads','L.Contrib%','L2R%','Ineligible Retails']];
+            crossMonthTotals.sorted.forEach(([src,[l,r]])=>{const tot=fin(l,r);const nb=crossMonthTotals.nbBySrc.get(src)||0;aoa.push([src,tot.l,crossMonthTotals.enqBySrc.get(src)||0,tot.r+nb,tot.r,nb,crossMonthTotals.l>0?+(tot.l/crossMonthTotals.l*100).toFixed(1):0,+tot.l2r.toFixed(1),crossMonthTotals.nrBySrc.get(src)||0]);});
+            aoa.push(['Grand Total',crossMonthTotals.l,crossMonthTotals.gEnq,crossMonthTotals.r+crossMonthTotals.gNB,crossMonthTotals.r,crossMonthTotals.gNB,100,+crossMonthTotals.l2r.toFixed(1),crossMonthTotals.gNR]);
             exportCsv(aoa,'RE_Source_AllMonths.csv');
           }}),
           !viewerMode && onDetailedCsv && ce(DetailedCsvBtn, { onClick:()=>onDetailedCsv('Source', null) })
@@ -3037,11 +3042,12 @@ const SourceTab = React.memo(function SourceTab({ data, rawData, filters, months
             ce('th',{style:{cursor:'pointer'},onClick:()=>toggleSrcSort('l')},'Leads'+srcSortArrow('l')),
             ce('th',{style:{cursor:'pointer'},onClick:()=>toggleSrcSort('enq')},'Enquiries'+srcSortArrow('enq')),
             ce('th',null,'L.Contrib%'),
+            ce('th',{style:{cursor:'pointer'},onClick:()=>toggleSrcSort('tr')},'Total Retail'+srcSortArrow('tr')),
             ce('th',{style:{cursor:'pointer'},onClick:()=>toggleSrcSort('r')},'Retail'+srcSortArrow('r')),
+            ce('th',{style:{color:'#fff',cursor:'pointer'},onClick:()=>toggleSrcSort('nb')},'Retail from Non BD Leads'+srcSortArrow('nb')),
             ce('th',null,'R.Contrib%'),
             ce('th',{style:{cursor:'pointer'},onClick:()=>toggleSrcSort('l2r')},'L2R%'+srcSortArrow('l2r')),
             ce('th',{style:{color:'#fff',cursor:'pointer'},onClick:()=>toggleSrcSort('nr')},'Ineligible Retails'+srcSortArrow('nr')),
-            ce('th',{style:{color:'#fff',cursor:'pointer'},onClick:()=>toggleSrcSort('nb')},'Retail from Non BD Leads'+srcSortArrow('nb')),
           )),
           ce('tbody', null,
             ...crossSorted.map(([src,[l,r]]) => {
@@ -3051,11 +3057,12 @@ const SourceTab = React.memo(function SourceTab({ data, rawData, filters, months
                 ce('td',null,Nf(tot.l)),
                 ce('td',null,Nf(crossMonthTotals.enqBySrc.get(src)||0)),
                 ce('td',null,crossMonthTotals.l>0?Pf(tot.l/crossMonthTotals.l*100):'—'),
+                ce('td',{style:{color:'#1E3A8A',fontWeight:800}},Nf(tot.r+(crossMonthTotals.nbBySrc.get(src)||0))),
                 ce('td',{style:{color:'#0891B2',fontWeight:700}},Nf(tot.r)),
+                ce('td',{style:{color:'#0F766E',fontWeight:700}},Nf(crossMonthTotals.nbBySrc.get(src)||0)),
                 ce('td',null,crossMonthTotals.r>0?Pf(tot.r/crossMonthTotals.r*100):'—'),
                 ce('td',{style:{color:'#D97706',fontWeight:700}},tot.l2r>0?Pf(tot.l2r):'—'),
                 ce('td',{style:{color:'#7C3AED',fontWeight:700}},Nf(crossMonthTotals.nrBySrc.get(src)||0)),
-                ce('td',{style:{color:'#0F766E',fontWeight:700}},Nf(crossMonthTotals.nbBySrc.get(src)||0)),
               );
             }),
             ce('tr',{key:'gtotal',className:'total-row'},
@@ -3063,11 +3070,12 @@ const SourceTab = React.memo(function SourceTab({ data, rawData, filters, months
               ce('td',null,Nf(crossMonthTotals.l)),
               ce('td',null,Nf(crossMonthTotals.gEnq)),
               ce('td',null,'100.0%'),
+              ce('td',{style:{color:'#1E3A8A',fontWeight:800}},Nf(crossMonthTotals.r+crossMonthTotals.gNB)),
               ce('td',{style:{color:'#0891B2',fontWeight:700}},Nf(crossMonthTotals.r)),
+              ce('td',{style:{color:'#0F766E',fontWeight:700}},Nf(crossMonthTotals.gNB)),
               ce('td',null,'100.0%'),
               ce('td',{style:{color:'#D97706',fontWeight:700}},crossMonthTotals.l2r>0?Pf(crossMonthTotals.l2r):'—'),
               ce('td',{style:{color:'#7C3AED',fontWeight:700}},Nf(crossMonthTotals.gNR)),
-              ce('td',{style:{color:'#0F766E',fontWeight:700}},Nf(crossMonthTotals.gNB)),
             )
           )
         )
