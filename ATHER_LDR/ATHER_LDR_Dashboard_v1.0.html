@@ -725,7 +725,8 @@ function parseAtherRetailRows(raw){
           const rd0=parseAtherDate(retailDateColKey?String(r[retailDateColKey]||'').trim():get(r,DATE_ALIASES));
           if(rd0&&!isNaN(rd0.getTime()))inMonth=normalizeAtherMonth(['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][rd0.getMonth()]+"'"+rd0.getFullYear());
         }
-        if(inId&&inMonth&&atherMonthOrder(inMonth)>=CUTOFF_MONTH_ORDER_CLEAR)ineligibleRows.push({sourceLeadId:inId,invoiceMonth:inMonth});
+        const inYear=parseInt((inMonth.match(/(\d{4})$/)||[])[1],10);
+        if(inId&&inMonth&&inYear<2090&&atherMonthOrder(inMonth)>=CUTOFF_MONTH_ORDER_CLEAR)ineligibleRows.push({sourceLeadId:inId,invoiceMonth:inMonth});
         continue;
       }
     } else if(convRetailColKey){
@@ -4894,8 +4895,8 @@ function App({fbUser,role,presence,onSignOut,onAdminOpen}){
   const [isPending,startT]=useTransition();
   const [detailModal,setDetailModal]=useState(null);
   const [fontScale,setFontScale]=useState(1.00);
-  const [orderIdDedup,setOrderIdDedup]=useState(true);
-  const orderIdDedupRef=useRef(true);
+  const [orderIdDedup,setOrderIdDedup]=useState(false);
+  const orderIdDedupRef=useRef(false);
   const leadResultRef=useRef(null);
   const retailResultRef=useRef(null);
   useEffect(()=>{orderIdDedupRef.current=orderIdDedup;},[orderIdDedup]);
