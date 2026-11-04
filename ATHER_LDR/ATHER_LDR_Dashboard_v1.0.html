@@ -3404,16 +3404,25 @@ const PivotTab = React.memo(function PivotTab({ data, filters, months, RT, onDet
   const grandTotals = useMemo(() => {
     if (!pivotResult) return { colVals: {}, gl: 0, gr: 0 };
     const colVals = {};
-    let gl = 0, gr = 0;
+    let gl = 0;
     for (const { sub } of pivotResult.tbl.values()) {
       for (const [c, v] of sub) {
         if (!colVals[c]) colVals[c] = [0, 0, 0, 0];
         for (let i = 0; i < 4; i++) colVals[c][i] += v[i];
-        gl += v[0]; gr += v[1];
+        gl += v[0];
       }
     }
+    // Override retail totals in grand total row with direct retail sheet counts
+    // (matches Source Analysis — covers retails without a matched lead in lead master)
+    const arbm = data.atherRetailByMonth || {};
+    if (colDims.length === 1 && colDims[0] === 'lm') {
+      for (const c of Object.keys(colVals)) {
+        if (arbm[c] !== undefined) { colVals[c][1] = arbm[c]; colVals[c][2] = 0; colVals[c][3] = 0; }
+      }
+    }
+    const gr = Object.values(colVals).reduce((s, cv) => s + cv[1], 0);
     return { colVals, gl, gr };
-  }, [pivotResult]);
+  }, [pivotResult, data, colDims]);
 
   const unapplied = [];
 
