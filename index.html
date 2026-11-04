@@ -679,11 +679,19 @@ function parseAtherRetailRows(raw){
   const ORDER_ID_ALIASES=['order id','orderid','order_id'];
   let orderIdColKey=null;
   for(const a of ORDER_ID_ALIASES){if(keyMap[a]){orderIdColKey=keyMap[a];break;}}
-  // Payment Eligibility column
+  // Eligibility: Format A = "Payment Eligibility" = "Eligible"
+  //             Format B = "Converted to Retail" = "Y" (conversion-tracking sheet)
   const ELIG_ALIASES=['payment eligibility','paymenteligibility','payment_eligibility','eligibility'];
   let eligColKey=null;
   for(const a of ELIG_ALIASES){if(keyMap[a]){eligColKey=keyMap[a];break;}}
-  // Retail date column (optional)
+  const CONV_RETAIL_ALIASES=['converted to retail','convertedtoretail','converted_to_retail','is retailed','is_retailed'];
+  let convRetailColKey=null;
+  if(!eligColKey){for(const a of CONV_RETAIL_ALIASES){if(keyMap[a]){convRetailColKey=keyMap[a];break;}}}
+  // "Age <=90 days" eligibility flag (Format B)
+  const AGE90_ALIASES=['age <=90 days','age<=90days','age <=90','age<=90'];
+  let age90ColKey=null;
+  for(const a of AGE90_ALIASES){if(keyMap[a]){age90ColKey=keyMap[a];break;}}
+  // Retail date column
   const DATE_ALIASES=['retail date','retaildate','retail_date','retail_attribution_date',
     'retailattributiondate','attribution date','attribution_date','date'];
   let retailDateColKey=null;
@@ -692,6 +700,8 @@ function parseAtherRetailRows(raw){
   const CONV_AGE_ALIASES=['retail conversion age','retailconversionage','retail_conversion_age','conversion age','conversion_age','conversionage'];
   let convAgeColKey=null;
   for(const a of CONV_AGE_ALIASES){if(keyMap[a]){convAgeColKey=keyMap[a];break;}}
+  const usingFormatB=!eligColKey&&!!convRetailColKey;
+  console.log('[ATHER RETAIL] Sheet format:',(eligColKey?'A (Payment Eligibility)':usingFormatB?'B (Converted to Retail)':'UNKNOWN'));
   // Collect eligibility value distribution for diagnostics
   const eligValMap=new Map();
   const rows=[];
@@ -699,23 +709,45 @@ function parseAtherRetailRows(raw){
   let maxRetailDate=null;
   const rawKeySamples=[];
   const includedModelMap=new Map();
+  const MONTH_ALIASES=['retail month','retailmonth','retail_month','performance month','performancemonth','performance_month','month'];
   for(const r of raw){
-    // Track all eligibility values
-    const elig=eligColKey?String(r[eligColKey]||'').trim():get(r,ELIG_ALIASES);
-    eligValMap.set(elig||'(empty)',(eligValMap.get(elig||'(empty)')||0)+1);
-    // Filter 1: Payment Eligibility must be "Eligible"
-    if(elig.toLowerCase()!=='eligible'){excludedEligibility++;continue;}
+    // Format A: Payment Eligibility = "Eligible"
+    // Format B: Converted to Retail = "Y" (and optionally Age <=90 days = "Y")
+    if(eligColKey){
+      const elig=String(r[eligColKey]||'').trim();
+      eligValMap.set(elig||'(empty)',(eligValMap.get(elig||'(empty)')||0)+1);
+      if(elig.toLowerCase()!=='eligible'){excludedEligibility++;continue;}
+    } else if(convRetailColKey){
+      const cv=String(r[convRetailColKey]||'').trim().toUpperCase();
+      eligValMap.set(cv||'(empty)',(eligValMap.get(cv||'(empty)')||0)+1);
+      if(cv!=='Y'&&cv!=='YES'){excludedEligibility++;continue;}
+      // If Age <=90 days column exists, skip rows where it's "N"
+      if(age90ColKey){
+        const a90=String(r[age90ColKey]||'').trim().toUpperCase();
+        if(a90==='N'){excludedConvAge++;continue;}
+      }
+    } else {
+      excludedEligibility++;continue; // no eligibility signal
+    }
     // Join key: Lead ID (Salesforce opty_id format, e.g. 00QS4000...)
     const sourceLeadId=leadIdColKey?String(r[leadIdColKey]||'').trim():get(r,LEAD_ID_ALIASES);
     if(!sourceLeadId){excludedKey++;continue;}
-    // Retail Month (format: "Apr'26" or "Apr'2026")
-    const performanceMonth=normalizeAtherMonth(get(r,['retail month','retailmonth','retail_month',
-      'performance month','performancemonth','performance_month','month']));
+    // Retail Month: try named column first, then derive from Retail Date
+    let performanceMonth=normalizeAtherMonth(get(r,MONTH_ALIASES));
+    if(!performanceMonth||atherMonthOrder(performanceMonth)<CUTOFF_MONTH_ORDER_CLEAR){
+      // Derive from Retail Date
+      const ds=retailDateColKey?String(r[retailDateColKey]||'').trim():get(r,DATE_ALIASES);
+      const rd=parseAtherDate(ds);
+      if(rd&&!isNaN(rd.getTime())){
+        const mo=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][rd.getMonth()];
+        performanceMonth=normalizeAtherMonth(mo+"'"+rd.getFullYear());
+      }
+    }
     if(!performanceMonth||atherMonthOrder(performanceMonth)<CUTOFF_MONTH_ORDER_CLEAR){excludedMonth++;continue;}
     // Order ID extracted (dedup applied externally via toggle — not filtered here)
     const orderId=orderIdColKey?String(r[orderIdColKey]||'').trim():get(r,ORDER_ID_ALIASES);
-    // Filter: Retail Conversion Age > 90 → exclude
-    if(convAgeColKey){
+    // Filter: Retail Conversion Age > 90 → exclude (Format A only; Format B uses Age <=90 days)
+    if(!usingFormatB&&convAgeColKey){
       const ca=parseFloat(r[convAgeColKey]);
       if(!isNaN(ca)&&ca>90){excludedConvAge++;continue;}
     }
