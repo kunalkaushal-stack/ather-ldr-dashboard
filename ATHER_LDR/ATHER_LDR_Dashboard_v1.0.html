@@ -5368,9 +5368,6 @@ function App({fbUser,role,presence,onSignOut,onAdminOpen}){
           ce('button',{className:'fs-btn',onClick:incFont,disabled:fontScale>=FONT_MAX,title:'Increase font size','aria-label':'Increase font size'},'A+')
         ),
         !clientMode&&ce('div',{style:{display:'flex',alignItems:'center',background:'#F1F5F9',borderRadius:20,padding:'2px',border:'1px solid #E2E8F0',gap:1,flexShrink:0}},
-          ce('button',{onClick:()=>setLeadsMode('total'),
-            style:{padding:'4px 8px',fontSize:9,fontWeight:700,fontFamily:'inherit',border:'none',borderRadius:18,cursor:'pointer',transition:'all 120ms',
-              background:leadsMode==='total'?'#164E63':'transparent',color:leadsMode==='total'?'#fff':'#64748B',whiteSpace:'nowrap'}},'Total'),
           ce('button',{onClick:()=>setLeadsMode('create'),
             style:{padding:'4px 8px',fontSize:9,fontWeight:700,fontFamily:'inherit',border:'none',borderRadius:18,cursor:'pointer',transition:'all 120ms',
               background:leadsMode==='create'?'#164E63':'transparent',color:leadsMode==='create'?'#fff':'#64748B',whiteSpace:'nowrap'}},'On Create'),
