@@ -4905,7 +4905,7 @@ const ActionPlanTab = React.memo(function ActionPlanTab({ data, rawJoined, filte
    APP ROOT — Ather LDR Dashboard
    ════════════════════════════════════════════════════════════════════ */
 /* ════════════════════════════════════════════════════════════════════
-   RETAIL VINTAGE TAB — retails by lead-cohort age (M1 = retailed in the lead's own month)
+   RETAIL JOURNEY TAB — retails by lead-cohort age (M1 = retailed in the lead's own month)
    Standalone: reads rawJoined / nsRetailRows only, ignores the global filters and mode toggle.
    ════════════════════════════════════════════════════════════════════ */
 const VINTAGE_MONTHS=["May'2026","Jun'2026","Jul'2026","Aug'2026","Sep'2026","Oct'2026","Nov'2026"];
@@ -4943,7 +4943,7 @@ const VintageTab = React.memo(function VintageTab({ rawJoined, nsRetailRows, vie
     for (const a of VINTAGE_AGES) aoa.push(['M'+a,...M.map((_,j)=>calc.cnt[a][j]||'')]);
     aoa.push(['Total',...calc.tot],[],['CR%',...M.map(lbl)]);
     for (const a of VINTAGE_AGES) aoa.push(['M'+a,...M.map((_,j)=>calc.cnt[a][j]?+crOf(a,j).toFixed(2):'')]);
-    exportCsv(aoa,'Retail_Vintage'+(incNB?'_Total':'')+'.csv');
+    exportCsv(aoa,'Retail_Journey'+(incNB?'_Total':'')+'.csv');
   };
   const head = (title) => ce('thead',null,ce('tr',null,
     ce('th',{className:'left',style:{...thSt,textAlign:'left',minWidth:90}},title),
@@ -4952,7 +4952,7 @@ const VintageTab = React.memo(function VintageTab({ rawJoined, nsRetailRows, vie
     background:on?'#164E63':'#fff',color:on?'#fff':'#475569'}},label);
   return ce('div',{className:'fade-up'},
     ce('div',{className:'card',style:{padding:'14px 18px',marginBottom:14,display:'flex',alignItems:'center',gap:12,flexWrap:'wrap'}},
-      ce('div',{className:'section-title',style:{marginBottom:0}},'Retail Vintage — lead cohort age (M1 = retailed in the month the lead was created)'),
+      ce('div',{className:'section-title',style:{marginBottom:0}},'Retail Journey — lead cohort age (M1 = retailed in the month the lead was created)'),
       ce('div',{style:{display:'flex',gap:6,marginLeft:'auto',alignItems:'center'}},
         btn(!incNB,'Retail',()=>setIncNB(false)),
         btn(incNB,'Total Retail (incl. Non-BD)',()=>setIncNB(true)),
@@ -4990,7 +4990,7 @@ const TABS = [
   { id:'statexsrc',       label:'State Performance' },
   { id:'geodealer',       label:'Geo & Dealer' },
   { id:'pivot',           label:'Pivot Table' },
-  { id:'vintage',         label:'Retail Vintage' },
+  { id:'vintage',         label:'Retail Journey' },
   { id:'diagnosis',       label:'Diagnosis' },
   { id:'forecast',        label:'Forecast' },
   { id:'actionplan',      label:'Action Plan' },
