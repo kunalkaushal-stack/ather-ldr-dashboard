@@ -711,6 +711,9 @@ function parseAtherRetailRows(raw){
   const rawKeySamples=[];
   const includedModelMap=new Map();
   const MONTH_ALIASES=['retail month','retailmonth','retail_month','performance month','performancemonth','performance_month','month'];
+  // Retail-sheet attributes used to attribute retails that have no matching lead (non-BD / ineligible)
+  const extraOf=r=>({medium:get(r,['medium']),state:get(r,['state']),city:get(r,['city']),
+    enqModel:get(r,['enquiry model','enquirymodel']),leadMonth:normalizeAtherMonth(get(r,['lead month','leadmonth','lead_month']))});
   for(const r of raw){
     // Format A: Payment Eligibility = "Eligible"
     // Format B: Converted to Retail = "Y" (and optionally Age <=90 days = "Y")
@@ -726,7 +729,7 @@ function parseAtherRetailRows(raw){
           if(rd0&&!isNaN(rd0.getTime()))inMonth=normalizeAtherMonth(['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][rd0.getMonth()]+"'"+rd0.getFullYear());
         }
         const inYear=parseInt((inMonth.match(/(\d{4})$/)||[])[1],10);
-        if(inId&&inMonth&&inYear<2090&&atherMonthOrder(inMonth)>=CUTOFF_MONTH_ORDER_CLEAR)ineligibleRows.push({sourceLeadId:inId,invoiceMonth:inMonth});
+        if(inId&&inMonth&&inYear<2090&&atherMonthOrder(inMonth)>=CUTOFF_MONTH_ORDER_CLEAR)ineligibleRows.push({sourceLeadId:inId,invoiceMonth:inMonth,...extraOf(r)});
         continue;
       }
     } else if(convRetailColKey){
@@ -774,7 +777,7 @@ function parseAtherRetailRows(raw){
     const purchasedModel=get(r,['retail model','retail_model','retailmodel','booking model',
       'bookingmodel','booking_model','purchasedmodel','purchased model','model','model name']);
     includedModelMap.set(purchasedModel||'(blank)',(includedModelMap.get(purchasedModel||'(blank)')||0)+1);
-    rows.push({sourceLeadId,orderId,performanceMonth,callType,retailDate,purchasedModel});
+    rows.push({sourceLeadId,orderId,performanceMonth,callType,retailDate,purchasedModel,...extraOf(r)});
   }
   const uniqueIds=new Set(rows.map(r=>r.sourceLeadId)).size;
   const uniqueOrders=new Set(rows.map(r=>r.orderId).filter(Boolean)).size;
@@ -788,6 +791,20 @@ function parseAtherRetailRows(raw){
     retailMonthColFound:!!(keyMap['retail month']||keyMap['retailmonth']||keyMap['retail_month']),
     eligibilityValues,includedModelValues,allRetailCols,rawKeySamples
   },maxRetailDate};
+}
+
+// Retail rows that sit outside the lead-based funnel, attributed via the retail sheet's own fields:
+//  kind 'inelig' = Payment Eligibility != Eligible ; kind 'nonbd' = eligible retail whose Lead ID is not in any lead sheet
+function buildNsRetailRows(leadRows,eligibleRetailRows,ineligibleRows){
+  const leadById=new Map(leadRows.map(l=>[l.opty_id,l]));
+  const mk=(kind,x,l)=>({kind,invoiceMonth:x.invoiceMonth||x.performanceMonth,leadMonth:l?l.lead_month:(x.leadMonth||''),
+    source:(l&&l.source)||x.medium||'Unknown',
+    state:l?l.state:(canonicalState(x.state)||'Unknown'),city:l?l.city:(x.city||'Unknown'),
+    lt:l?l.lt:'Unknown',model:l?l.model:(canonicalModel(canonEnqModel(x.enqModel))||'Unknown')});
+  const out=[];
+  for(const x of(ineligibleRows||[]))out.push(mk('inelig',x,leadById.get(x.sourceLeadId)));
+  for(const x of eligibleRetailRows){if(!leadById.has(x.sourceLeadId))out.push(mk('nonbd',x,null));}
+  return out;
 }
 
 function joinREData(leadResult,retailResult){
@@ -1562,8 +1579,7 @@ function DetailModal({ rawJoined, filters, RT, leadsMode, title, monthOverride, 
 }
 
 function isRetailedLead(r) {
-  if (!r.isBooked || !r.booking_month || !r.lead_month) return false;
-  return ATHER_SCOPE_MODELS.has(canonPurMdl(r.purchasedModel||''));
+  return !!(r.isBooked && r.booking_month && r.lead_month);
 }
 
 function exportDetailedCsv(rawJoined, filters, RT, leadsMode, filename, monthOverride) {
@@ -1728,6 +1744,8 @@ const _RE_PUR_MDL_CANONICAL = {
   '450':'Ather 450X','ather 450':'Ather 450X',
   // Ather Konarc (new model from Oct'2026)
   'konarc':'Ather Konarc','ather konarc':'Ather Konarc',
+  'konarc sr2':'Ather Konarc','konarc sr3':'Ather Konarc','konarc sr1':'Ather Konarc',
+  'ather konarc sr2':'Ather Konarc','ather konarc sr3':'Ather Konarc','ather konarc sr1':'Ather Konarc',
 };
 // canonPurMdl: case-insensitive canonical lookup for retail/purchased model
 function canonPurMdl(s){const t=(s||'').trim();return _RE_PUR_MDL_CANONICAL[t.toLowerCase()]||t;}
@@ -2075,7 +2093,6 @@ function MonthlyGrids({ title, months, renderAgg, srcGroups, dimLabel, expandedG
    ════════════════════════════════════════════════════════════════════ */
 const OverviewTab = React.memo(function OverviewTab({ data, filters, RT }) {
   const { maps, monthly, sm, cm, mxst, univ: univRaw, csm: csmRaw } = data;
-  const atherRetailByMonth = data.atherRetailByMonth || {};
   const csm = csmRaw || [];
   const univ = univRaw || [];
   const pmsm = data.pmsm || [];
@@ -2156,14 +2173,7 @@ const OverviewTab = React.memo(function OverviewTab({ data, filters, RT }) {
         }
       }
     }
-    // Direct retail count overrides join-derived count (exact match to sheet)
-    const allMForR=!filters.months||filters.months.size===0;
-    let directR=0;
-    for(const [m,cnt] of Object.entries(atherRetailByMonth)){
-      if(allMForR||filters.months.has(m))directR+=cnt;
-    }
-    const effR=directR>0?directR:gR;
-    return { l:gL,r:effR,l2r:gL>0?effR/gL*100:0, pL,pR,pL2r:pL>0?pR/pL*100:0, oL,oR,oL2r:oL>0?oR/oL*100:0, dL, coL };
+    return { l:gL,r:gR,l2r:gL>0?gR/gL*100:0, pL,pR,pL2r:pL>0?pR/pL*100:0, oL,oR,oL2r:oL>0?oR/oL*100:0, dL, coL };
   }, [sm, univ, cm, pmsm, pm_csm, maps, filters, paidGrp, orgGrp, hasCityFilter, getLR]);
 
   const trendData = useMemo(() => {
@@ -2217,16 +2227,9 @@ const OverviewTab = React.memo(function OverviewTab({ data, filters, RT }) {
         const cur = byMonth.get(m) || [0,0]; cur[1]+=r; byMonth.set(m, cur);
       }
     }
-    // Merge in months from atherRetailByMonth that have no in-scope leads
-    for(const [m,cnt] of Object.entries(atherRetailByMonth)){
-      if(!byMonth.has(m))byMonth.set(m,[0,0]);
-    }
     return [...byMonth.entries()]
       .sort((a,b) => monthOrder(a[0]) - monthOrder(b[0]))
-      .map(([m, v]) => {
-        const r=atherRetailByMonth[m]!==undefined?atherRetailByMonth[m]:v[1];
-        return { m, l:v[0], r, l2r:v[0]>0?r/v[0]*100:0 };
-      });
+      .map(([m, v]) => ({ m, l:v[0], r:v[1], l2r:v[0]>0?v[1]/v[0]*100:0 }));
   }, [monthly, univ, cm, pmsm, pm_csm, maps, filters, hasCityFilter, getLR]);
 
   const srcBreak = useMemo(() => {
@@ -2641,7 +2644,8 @@ const OverviewTab = React.memo(function OverviewTab({ data, filters, RT }) {
    SOURCE ANALYSIS TAB
    ════════════════════════════════════════════════════════════════════ */
 const ENQUIRY_STATUS = 'L1 Verified (Callback Scheduled)';
-const SourceTab = React.memo(function SourceTab({ data, rawData, filters, months, RT, onDetailedCsv, nsRetailRows, rawJoined, viewerMode }) {
+const SourceTab = React.memo(function SourceTab({ data, rawData, filters, months, RT, onDetailedCsv, nsRetailRows, rawJoined, viewerMode, leadsMode }) {
+  const nsMonthOf = r => (leadsMode === 'create' && r.leadMonth) ? r.leadMonth : r.invoiceMonth;
   const { maps, sm, univ: univRaw, csm: csmRaw } = data;
   const univ = univRaw || [];
   const csm  = csmRaw  || [];
@@ -2753,22 +2757,22 @@ const SourceTab = React.memo(function SourceTab({ data, rawData, filters, months
     }
     // Pass 3: Non-Scope Retail (NR) — iterate nsRetailRows, filter by invoiceMonth + active filters
     const nsRows = nsRetailRows || [];
-    const nrBySrc = new Map();
-    let gNR = 0;
+    const nrBySrc = new Map(), nbBySrc = new Map();
+    let gNR = 0, gNB = 0;
     const allS3 = !filters.sources || filters.sources.size === 0;
     const allSt3 = !filters.states  || filters.states.size  === 0;
     const allCt3 = !filters.cities  || filters.cities.size  === 0;
     const allLT3 = !filters.leadTypes || filters.leadTypes.size === 0;
     const allMd3 = !filters.models  || filters.models.size  === 0;
     for (const r of nsRows) {
-      if (r.invoiceMonth !== M) continue;
+      if (nsMonthOf(r) !== M) continue;
       if (!allS3  && (filters.sources   === FILTER_CLEARED || !filters.sources.has(r.source)))   continue;
       if (!allSt3 && (filters.states    === FILTER_CLEARED || !filters.states.has(r.state)))     continue;
       if (!allCt3 && (filters.cities    === FILTER_CLEARED || !filters.cities.has(r.city)))      continue;
       if (!allLT3 && (filters.leadTypes === FILTER_CLEARED || !filters.leadTypes.has(r.lt)))     continue;
       if (!allMd3 && (filters.models    === FILTER_CLEARED || !filters.models.has(r.model)))     continue;
-      gNR++;
-      nrBySrc.set(r.source, (nrBySrc.get(r.source)||0)+1);
+      if (r.kind === 'nonbd') { gNB++; nbBySrc.set(r.source, (nbBySrc.get(r.source)||0)+1); }
+      else { gNR++; nrBySrc.set(r.source, (nrBySrc.get(r.source)||0)+1); }
     }
     // Pass 4: Enquiries — rawJoined records where webId ∈ {Direct Push, L1 Nurtured}, attributed by lead_month
     const enqBySrc = new Map();
@@ -2788,7 +2792,7 @@ const SourceTab = React.memo(function SourceTab({ data, rawData, filters, months
       gEnq++;
       enqBySrc.set(r.source, (enqBySrc.get(r.source)||0)+1);
     }
-    if (gL === 0 && gR === 0 && gNR === 0) return null;
+    if (gL === 0 && gR === 0 && gNR === 0 && gNB === 0) return null;
     const sortedEntries = [...bySrc.entries()];
     sortedEntries.sort((a,b) => {
       const [ak,[al,ar]]=a,[bk,[bl,br]]=b;
@@ -2799,6 +2803,7 @@ const SourceTab = React.memo(function SourceTab({ data, rawData, filters, months
       else if(srcTabSK==='r'){av=ar;bv=br;}
       else if(srcTabSK==='l2r'){av=al>0?ar/al:0;bv=bl>0?br/bl:0;}
       else if(srcTabSK==='nr'){av=nrBySrc.get(ak)||0;bv=nrBySrc.get(bk)||0;}
+      else if(srcTabSK==='nb'){av=nbBySrc.get(ak)||0;bv=nbBySrc.get(bk)||0;}
       return srcTabAsc?av-bv:bv-av;
     });
     const sorted = sortedEntries;
@@ -2809,9 +2814,9 @@ const SourceTab = React.memo(function SourceTab({ data, rawData, filters, months
         ce('div', { className:'section-title', style:{marginBottom:0} }, M),
         ce('div',{style:{display:'flex',gap:0}},
           viewerMode ? ce(ViewerCsvGate,null) : ce(CsvBtn, { onClick:()=>{
-            const aoa=[['Source','Leads','Enquiries','Retail','L.Contrib%','L2R%','Ineligible Retails']];
-            csvSorted.forEach(([src,[l,r]])=>{const tot=fin(l,r);aoa.push([src,tot.l,enqBySrc.get(src)||0,tot.r,gL>0?+(tot.l/gL*100).toFixed(1):0,+tot.l2r.toFixed(1),nrBySrc.get(src)||0]);});
-            aoa.push(['Grand Total',gL,gEnq,gR,100,gL>0?+(gR/gL*100).toFixed(1):0,gNR]);
+            const aoa=[['Source','Leads','Enquiries','Retail','L.Contrib%','L2R%','Ineligible Retails','Retail from Non BD Leads']];
+            csvSorted.forEach(([src,[l,r]])=>{const tot=fin(l,r);aoa.push([src,tot.l,enqBySrc.get(src)||0,tot.r,gL>0?+(tot.l/gL*100).toFixed(1):0,+tot.l2r.toFixed(1),nrBySrc.get(src)||0,nbBySrc.get(src)||0]);});
+            aoa.push(['Grand Total',gL,gEnq,gR,100,gL>0?+(gR/gL*100).toFixed(1):0,gNR,gNB]);
             exportCsv(aoa,'RE_Source_'+M.replace(/[^a-z0-9]/gi,'_')+'.csv');
           }}),
           !viewerMode && onDetailedCsv && ce(DetailedCsvBtn, { onClick:()=>onDetailedCsv('Source', M) })
@@ -2829,6 +2834,7 @@ const SourceTab = React.memo(function SourceTab({ data, rawData, filters, months
               ce('th',null,'R.Contrib%'),
               ce('th',{style:{cursor:'pointer'},onClick:()=>toggleSrcSort('l2r')},'L2R%'+srcSortArrow('l2r')),
               ce('th',{style:{color:'#fff',cursor:'pointer'},onClick:()=>toggleSrcSort('nr')},'Ineligible Retails'+srcSortArrow('nr')),
+              ce('th',{style:{color:'#fff',cursor:'pointer'},onClick:()=>toggleSrcSort('nb')},'Retail from Non BD Leads'+srcSortArrow('nb')),
             )
           ),
           ce('tbody', null,
@@ -2843,6 +2849,7 @@ const SourceTab = React.memo(function SourceTab({ data, rawData, filters, months
                 ce('td',null,gR>0?Pf(tot.r/gR*100):'—'),
                 ce('td',{style:{color:'#D97706',fontWeight:700}},tot.l2r>0?Pf(tot.l2r):'—'),
                 ce('td',{style:{color:'#7C3AED',fontWeight:700}},Nf(nrBySrc.get(src)||0)),
+                ce('td',{style:{color:'#0F766E',fontWeight:700}},Nf(nbBySrc.get(src)||0)),
               );
             }),
             ce('tr',{key:'gtotal',className:'total-row'},
@@ -2854,12 +2861,13 @@ const SourceTab = React.memo(function SourceTab({ data, rawData, filters, months
               ce('td',null,'100.0%'),
               ce('td',{style:{color:'#D97706',fontWeight:700}},grand.l2r>0?Pf(grand.l2r):'—'),
               ce('td',{style:{color:'#7C3AED',fontWeight:700}},Nf(gNR)),
+              ce('td',{style:{color:'#0F766E',fontWeight:700}},Nf(gNB)),
             )
           )
         )
       )
     );
-  }, [sm, csm, univ, pmsm, pm_csm, smLead, univLead, csmLead, maps, filters, getLR, hasCityF, nsRetailRows, rawJoined, data.atherRetailByMonth, srcTabSK, srcTabAsc]);
+  }, [sm, csm, univ, pmsm, pm_csm, smLead, univLead, csmLead, maps, filters, getLR, hasCityF, nsRetailRows, rawJoined, leadsMode, srcTabSK, srcTabAsc]);
 
   const crossMonthTotals = useMemo(() => {
     const allS = !filters.sources || filters.sources.size === 0;
@@ -2949,22 +2957,22 @@ const SourceTab = React.memo(function SourceTab({ data, rawData, filters, months
     }
     // Pass 3 (cross-month): Non-Scope Retail
     const nsRows2 = nsRetailRows || [];
-    const nrBySrc2 = new Map();
-    let gNR2 = 0;
+    const nrBySrc2 = new Map(), nbBySrc2 = new Map();
+    let gNR2 = 0, gNB2 = 0;
     const allS3b = !filters.sources || filters.sources.size === 0;
     const allSt3b = !filters.states  || filters.states.size  === 0;
     const allCt3b = !filters.cities  || filters.cities.size  === 0;
     const allLT3b = !filters.leadTypes || filters.leadTypes.size === 0;
     const allMd3b = !filters.models  || filters.models.size  === 0;
     for (const r of nsRows2) {
-      if (!mSet.has(r.invoiceMonth)) continue;
+      if (!mSet.has(nsMonthOf(r))) continue;
       if (!allS3b  && (filters.sources   === FILTER_CLEARED || !filters.sources.has(r.source)))   continue;
       if (!allSt3b && (filters.states    === FILTER_CLEARED || !filters.states.has(r.state)))     continue;
       if (!allCt3b && (filters.cities    === FILTER_CLEARED || !filters.cities.has(r.city)))      continue;
       if (!allLT3b && (filters.leadTypes === FILTER_CLEARED || !filters.leadTypes.has(r.lt)))     continue;
       if (!allMd3b && (filters.models    === FILTER_CLEARED || !filters.models.has(r.model)))     continue;
-      gNR2++;
-      nrBySrc2.set(r.source, (nrBySrc2.get(r.source)||0)+1);
+      if (r.kind === 'nonbd') { gNB2++; nbBySrc2.set(r.source, (nbBySrc2.get(r.source)||0)+1); }
+      else { gNR2++; nrBySrc2.set(r.source, (nrBySrc2.get(r.source)||0)+1); }
     }
     // Pass 4 (cross-month): Enquiries — rawJoined where webId ∈ {Direct Push, L1 Nurtured}
     const rawJ2 = rawJoined || [];
@@ -2985,13 +2993,13 @@ const SourceTab = React.memo(function SourceTab({ data, rawData, filters, months
       enqBySrc2.set(r.source, (enqBySrc2.get(r.source)||0)+1);
     }
     const sorted = [...bySrc.entries()].sort((a,b)=>b[1][0]-a[1][0]);
-    return { l:gL, r:gR, l2r:gL>0?gR/gL*100:0, sorted, nrBySrc:nrBySrc2, gNR:gNR2, enqBySrc:enqBySrc2, gEnq:gEnq2 };
-  }, [sm, csm, univ, pmsm, pm_csm, smLead, univLead, csmLead, maps, filters, getLR, hasCityF, months, nsRetailRows, rawJoined, data.atherRetailByMonth]);
+    return { l:gL, r:gR, l2r:gL>0?gR/gL*100:0, sorted, nrBySrc:nrBySrc2, gNR:gNR2, nbBySrc:nbBySrc2, gNB:gNB2, enqBySrc:enqBySrc2, gEnq:gEnq2 };
+  }, [sm, csm, univ, pmsm, pm_csm, smLead, univLead, csmLead, maps, filters, getLR, hasCityF, months, nsRetailRows, rawJoined, leadsMode]);
 
   const crossSorted = React.useMemo(() => {
     if(!crossMonthTotals.sorted||!crossMonthTotals.sorted.length) return [];
     const s=[...crossMonthTotals.sorted];
-    const {enqBySrc:ebs,nrBySrc:nbs}=crossMonthTotals;
+    const {enqBySrc:ebs,nrBySrc:nrs,nbBySrc:nbs}=crossMonthTotals;
     s.sort((a,b)=>{
       const [ak,[al,ar]]=a,[bk,[bl,br]]=b;
       if(srcTabSK==='src') return srcTabAsc?ak.localeCompare(bk):bk.localeCompare(ak);
@@ -3000,7 +3008,8 @@ const SourceTab = React.memo(function SourceTab({ data, rawData, filters, months
       else if(srcTabSK==='enq'){av=ebs.get(ak)||0;bv=ebs.get(bk)||0;}
       else if(srcTabSK==='r'){av=ar;bv=br;}
       else if(srcTabSK==='l2r'){av=al>0?ar/al:0;bv=bl>0?br/bl:0;}
-      else if(srcTabSK==='nr'){av=nbs.get(ak)||0;bv=nbs.get(bk)||0;}
+      else if(srcTabSK==='nr'){av=nrs.get(ak)||0;bv=nrs.get(bk)||0;}
+      else if(srcTabSK==='nb'){av=nbs.get(ak)||0;bv=nbs.get(bk)||0;}
       return srcTabAsc?av-bv:bv-av;
     });
     return s;
@@ -3012,9 +3021,9 @@ const SourceTab = React.memo(function SourceTab({ data, rawData, filters, months
         ce('div', { className:'section-title', style:{marginBottom:0} }, '∑ All Months — Source Summary'),
         ce('div',{style:{display:'flex',gap:0}},
           viewerMode ? ce(ViewerCsvGate,null) : ce(CsvBtn, { onClick:()=>{
-            const aoa=[['Source','Leads','Enquiries','Retail','L.Contrib%','L2R%','Ineligible Retails']];
-            crossMonthTotals.sorted.forEach(([src,[l,r]])=>{const tot=fin(l,r);aoa.push([src,tot.l,crossMonthTotals.enqBySrc.get(src)||0,tot.r,crossMonthTotals.l>0?+(tot.l/crossMonthTotals.l*100).toFixed(1):0,+tot.l2r.toFixed(1),crossMonthTotals.nrBySrc.get(src)||0]);});
-            aoa.push(['Grand Total',crossMonthTotals.l,crossMonthTotals.gEnq,crossMonthTotals.r,100,+crossMonthTotals.l2r.toFixed(1),crossMonthTotals.gNR]);
+            const aoa=[['Source','Leads','Enquiries','Retail','L.Contrib%','L2R%','Ineligible Retails','Retail from Non BD Leads']];
+            crossMonthTotals.sorted.forEach(([src,[l,r]])=>{const tot=fin(l,r);aoa.push([src,tot.l,crossMonthTotals.enqBySrc.get(src)||0,tot.r,crossMonthTotals.l>0?+(tot.l/crossMonthTotals.l*100).toFixed(1):0,+tot.l2r.toFixed(1),crossMonthTotals.nrBySrc.get(src)||0,crossMonthTotals.nbBySrc.get(src)||0]);});
+            aoa.push(['Grand Total',crossMonthTotals.l,crossMonthTotals.gEnq,crossMonthTotals.r,100,+crossMonthTotals.l2r.toFixed(1),crossMonthTotals.gNR,crossMonthTotals.gNB]);
             exportCsv(aoa,'RE_Source_AllMonths.csv');
           }}),
           !viewerMode && onDetailedCsv && ce(DetailedCsvBtn, { onClick:()=>onDetailedCsv('Source', null) })
@@ -3031,6 +3040,7 @@ const SourceTab = React.memo(function SourceTab({ data, rawData, filters, months
             ce('th',null,'R.Contrib%'),
             ce('th',{style:{cursor:'pointer'},onClick:()=>toggleSrcSort('l2r')},'L2R%'+srcSortArrow('l2r')),
             ce('th',{style:{color:'#fff',cursor:'pointer'},onClick:()=>toggleSrcSort('nr')},'Ineligible Retails'+srcSortArrow('nr')),
+            ce('th',{style:{color:'#fff',cursor:'pointer'},onClick:()=>toggleSrcSort('nb')},'Retail from Non BD Leads'+srcSortArrow('nb')),
           )),
           ce('tbody', null,
             ...crossSorted.map(([src,[l,r]]) => {
@@ -3044,6 +3054,7 @@ const SourceTab = React.memo(function SourceTab({ data, rawData, filters, months
                 ce('td',null,crossMonthTotals.r>0?Pf(tot.r/crossMonthTotals.r*100):'—'),
                 ce('td',{style:{color:'#D97706',fontWeight:700}},tot.l2r>0?Pf(tot.l2r):'—'),
                 ce('td',{style:{color:'#7C3AED',fontWeight:700}},Nf(crossMonthTotals.nrBySrc.get(src)||0)),
+                ce('td',{style:{color:'#0F766E',fontWeight:700}},Nf(crossMonthTotals.nbBySrc.get(src)||0)),
               );
             }),
             ce('tr',{key:'gtotal',className:'total-row'},
@@ -3055,6 +3066,7 @@ const SourceTab = React.memo(function SourceTab({ data, rawData, filters, months
               ce('td',null,'100.0%'),
               ce('td',{style:{color:'#D97706',fontWeight:700}},crossMonthTotals.l2r>0?Pf(crossMonthTotals.l2r):'—'),
               ce('td',{style:{color:'#7C3AED',fontWeight:700}},Nf(crossMonthTotals.gNR)),
+              ce('td',{style:{color:'#0F766E',fontWeight:700}},Nf(crossMonthTotals.gNB)),
             )
           )
         )
@@ -3416,17 +3428,9 @@ const PivotTab = React.memo(function PivotTab({ data, filters, months, RT, onDet
         gl += v[0];
       }
     }
-    // Override retail totals in grand total row with direct retail sheet counts
-    // (matches Source Analysis — covers retails without a matched lead in lead master)
-    const arbm = data.atherRetailByMonth || {};
-    if (colDims.length === 1 && colDims[0] === 'lm') {
-      for (const c of Object.keys(colVals)) {
-        if (arbm[c] !== undefined) { colVals[c][1] = arbm[c]; colVals[c][2] = 0; colVals[c][3] = 0; }
-      }
-    }
     const gr = Object.values(colVals).reduce((s, cv) => s + cv[1], 0);
     return { colVals, gl, gr };
-  }, [pivotResult, data, colDims]);
+  }, [pivotResult]);
 
   const unapplied = [];
 
@@ -4155,19 +4159,16 @@ const DiagnosisTab = React.memo(function DiagnosisTab({ data, rawJoined, filters
 
   const funnel = useMemo(() => {
     const keep = makeRjFilter(filters, months);
-    let leads=0, enq=0, bookings=0;
+    let leads=0, enq=0, bookings=0, retails=0;
     for (const r of rj) {
       if (!keep(r)) continue;
       leads++;
       if ((r.statusName||'').trim() === ENQUIRY_STATUS) enq++;
       if (r.isBooked) bookings++;
+      if (isRetailedLead(r)) retails++;
     }
-    const arbm = data.atherRetailByMonth || {};
-    const mSet = new Set(months);
-    let retails = 0;
-    for (const [m,cnt] of Object.entries(arbm)) { if (mSet.has(m)) retails += cnt; }
     return { leads, enq, bookings, retails };
-  }, [rj, filters, months, data.atherRetailByMonth]);
+  }, [rj, filters, months]);
 
   const momData = useMemo(() => {
     const sorted = [...months].sort((a,b) => atherMonthOrder(a)-atherMonthOrder(b));
@@ -4912,6 +4913,7 @@ function App({fbUser,role,presence,onSignOut,onAdminOpen}){
     const arbm={};
     for(const rr of filteredRows){arbm[rr.performanceMonth]=(arbm[rr.performanceMonth]||0)+1;}
     setRawJoined(joined2);
+    setNsRetailRows(buildNsRetailRows(leadResultRef.current.rows,filteredRows,retailResultRef.current.ineligibleRows));
     setData(d=>d?{...payload2,retailTillDate:retailResultRef.current.maxRetailDate,atherRetailByMonth:arbm}:null);
     window.__atherJoined=joined2;
   },[orderIdDedup]);
@@ -5055,13 +5057,7 @@ function App({fbUser,role,presence,onSignOut,onAdminOpen}){
       if(!joined.length)throw new Error('No rows after join. Check opty_id / sourceLeadId column names.');
       const payload=buildPayload(joined);
       setRawJoined(joined);
-      {
-        const leadById=new Map(leadResult.rows.map(l=>[l.opty_id,l]));
-        setNsRetailRows((retailResult.ineligibleRows||[]).map(ir=>{
-          const l=leadById.get(ir.sourceLeadId)||{};
-          return{invoiceMonth:ir.invoiceMonth,source:l.source||'Unknown',state:l.state||'Unknown',city:l.city||'Unknown',lt:l.lt||'Unknown',model:l.model||'Unknown'};
-        }));
-      }
+      setNsRetailRows(buildNsRetailRows(leadResult.rows,retailRowsForJoin,retailResult.ineligibleRows));
 
       // Attach column/sample info to diagnostics for in-page display
       const rd2=retailResult.diagnostics;
@@ -5328,7 +5324,7 @@ function App({fbUser,role,presence,onSignOut,onAdminOpen}){
     const props={data:effectiveData,filters,months,RT,viewerMode:noSource,clientMode,onDetailedCsv:clientDetailedCsv};
     switch(tab){
       case 'overview':    return ce(OverviewTab,      props);
-      case 'source':      return ce(SourceTab,        {...props,rawData:data,nsRetailRows,rawJoined});
+      case 'source':      return ce(SourceTab,        {...props,rawData:data,nsRetailRows,rawJoined,leadsMode});
       case 'ltxsrc':      return ce(LTSourceTab,      props);
       case 'modelxsrc':   return ce(ModelSourceTab,   {...props,rawData:data});
       case 'statexsrc':   return ce(StateSourceTab,   {...props,rawJoined,leadsMode,nsRetailRows});
