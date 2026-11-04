@@ -705,6 +705,7 @@ function parseAtherRetailRows(raw){
   // Collect eligibility value distribution for diagnostics
   const eligValMap=new Map();
   const rows=[];
+  const ineligibleRows=[];
   let excludedEligibility=0,excludedKey=0,excludedMonth=0,excludedConvAge=0;
   let maxRetailDate=null;
   const rawKeySamples=[];
@@ -716,7 +717,17 @@ function parseAtherRetailRows(raw){
     if(eligColKey){
       const elig=String(r[eligColKey]||'').trim();
       eligValMap.set(elig||'(empty)',(eligValMap.get(elig||'(empty)')||0)+1);
-      if(elig.toLowerCase()!=='eligible'){excludedEligibility++;continue;}
+      if(elig.toLowerCase()!=='eligible'){
+        excludedEligibility++;
+        const inId=leadIdColKey?String(r[leadIdColKey]||'').trim():get(r,LEAD_ID_ALIASES);
+        let inMonth=normalizeAtherMonth(get(r,MONTH_ALIASES));
+        if(!inMonth){
+          const rd0=parseAtherDate(retailDateColKey?String(r[retailDateColKey]||'').trim():get(r,DATE_ALIASES));
+          if(rd0&&!isNaN(rd0.getTime()))inMonth=normalizeAtherMonth(['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][rd0.getMonth()]+"'"+rd0.getFullYear());
+        }
+        if(inId&&inMonth&&atherMonthOrder(inMonth)>=CUTOFF_MONTH_ORDER_CLEAR)ineligibleRows.push({sourceLeadId:inId,invoiceMonth:inMonth});
+        continue;
+      }
     } else if(convRetailColKey){
       const cv=String(r[convRetailColKey]||'').trim().toUpperCase();
       eligValMap.set(cv||'(empty)',(eligValMap.get(cv||'(empty)')||0)+1);
@@ -768,7 +779,7 @@ function parseAtherRetailRows(raw){
   const uniqueOrders=new Set(rows.map(r=>r.orderId).filter(Boolean)).size;
   const eligibilityValues=[...eligValMap.entries()].sort((a,b)=>b[1]-a[1]).slice(0,20).map(([v,c])=>v+'('+c+')');
   const includedModelValues=[...includedModelMap.entries()].sort((a,b)=>b[1]-a[1]);
-  return{rows,diagnostics:{
+  return{rows,ineligibleRows,diagnostics:{
     totalRows:raw.length,reRows:rows.length,uniqueIds,uniqueOrders,
     excludedEligibility,excludedKey,excludedMonth,excludedDupOrderId:0,excludedConvAge,
     eligibilityColFound:!!eligColKey,leadIdColFound:!!leadIdColKey,
@@ -2797,7 +2808,7 @@ const SourceTab = React.memo(function SourceTab({ data, rawData, filters, months
         ce('div', { className:'section-title', style:{marginBottom:0} }, M),
         ce('div',{style:{display:'flex',gap:0}},
           viewerMode ? ce(ViewerCsvGate,null) : ce(CsvBtn, { onClick:()=>{
-            const aoa=[['Source','Leads','Enquiries','Retail','L.Contrib%','L2R%','Non-Scope R']];
+            const aoa=[['Source','Leads','Enquiries','Retail','L.Contrib%','L2R%','Ineligible Retails']];
             csvSorted.forEach(([src,[l,r]])=>{const tot=fin(l,r);aoa.push([src,tot.l,enqBySrc.get(src)||0,tot.r,gL>0?+(tot.l/gL*100).toFixed(1):0,+tot.l2r.toFixed(1),nrBySrc.get(src)||0]);});
             aoa.push(['Grand Total',gL,gEnq,gR,100,gL>0?+(gR/gL*100).toFixed(1):0,gNR]);
             exportCsv(aoa,'RE_Source_'+M.replace(/[^a-z0-9]/gi,'_')+'.csv');
@@ -2816,7 +2827,7 @@ const SourceTab = React.memo(function SourceTab({ data, rawData, filters, months
               ce('th',{style:{cursor:'pointer'},onClick:()=>toggleSrcSort('r')},'Retail'+srcSortArrow('r')),
               ce('th',null,'R.Contrib%'),
               ce('th',{style:{cursor:'pointer'},onClick:()=>toggleSrcSort('l2r')},'L2R%'+srcSortArrow('l2r')),
-              ce('th',{style:{color:'#fff',cursor:'pointer'},onClick:()=>toggleSrcSort('nr')},'Non-Scope R'+srcSortArrow('nr')),
+              ce('th',{style:{color:'#fff',cursor:'pointer'},onClick:()=>toggleSrcSort('nr')},'Ineligible Retails'+srcSortArrow('nr')),
             )
           ),
           ce('tbody', null,
@@ -3000,7 +3011,7 @@ const SourceTab = React.memo(function SourceTab({ data, rawData, filters, months
         ce('div', { className:'section-title', style:{marginBottom:0} }, '∑ All Months — Source Summary'),
         ce('div',{style:{display:'flex',gap:0}},
           viewerMode ? ce(ViewerCsvGate,null) : ce(CsvBtn, { onClick:()=>{
-            const aoa=[['Source','Leads','Enquiries','Retail','L.Contrib%','L2R%','Non-Scope R']];
+            const aoa=[['Source','Leads','Enquiries','Retail','L.Contrib%','L2R%','Ineligible Retails']];
             crossMonthTotals.sorted.forEach(([src,[l,r]])=>{const tot=fin(l,r);aoa.push([src,tot.l,crossMonthTotals.enqBySrc.get(src)||0,tot.r,crossMonthTotals.l>0?+(tot.l/crossMonthTotals.l*100).toFixed(1):0,+tot.l2r.toFixed(1),crossMonthTotals.nrBySrc.get(src)||0]);});
             aoa.push(['Grand Total',crossMonthTotals.l,crossMonthTotals.gEnq,crossMonthTotals.r,100,+crossMonthTotals.l2r.toFixed(1),crossMonthTotals.gNR]);
             exportCsv(aoa,'RE_Source_AllMonths.csv');
@@ -3018,7 +3029,7 @@ const SourceTab = React.memo(function SourceTab({ data, rawData, filters, months
             ce('th',{style:{cursor:'pointer'},onClick:()=>toggleSrcSort('r')},'Retail'+srcSortArrow('r')),
             ce('th',null,'R.Contrib%'),
             ce('th',{style:{cursor:'pointer'},onClick:()=>toggleSrcSort('l2r')},'L2R%'+srcSortArrow('l2r')),
-            ce('th',{style:{color:'#fff',cursor:'pointer'},onClick:()=>toggleSrcSort('nr')},'Non-Scope R'+srcSortArrow('nr')),
+            ce('th',{style:{color:'#fff',cursor:'pointer'},onClick:()=>toggleSrcSort('nr')},'Ineligible Retails'+srcSortArrow('nr')),
           )),
           ce('tbody', null,
             ...crossSorted.map(([src,[l,r]]) => {
@@ -5043,7 +5054,13 @@ function App({fbUser,role,presence,onSignOut,onAdminOpen}){
       if(!joined.length)throw new Error('No rows after join. Check opty_id / sourceLeadId column names.');
       const payload=buildPayload(joined);
       setRawJoined(joined);
-      setNsRetailRows([]);
+      {
+        const leadById=new Map(leadResult.rows.map(l=>[l.opty_id,l]));
+        setNsRetailRows((retailResult.ineligibleRows||[]).map(ir=>{
+          const l=leadById.get(ir.sourceLeadId)||{};
+          return{invoiceMonth:ir.invoiceMonth,source:l.source||'Unknown',state:l.state||'Unknown',city:l.city||'Unknown',lt:l.lt||'Unknown',model:l.model||'Unknown'};
+        }));
+      }
 
       // Attach column/sample info to diagnostics for in-page display
       const rd2=retailResult.diagnostics;
