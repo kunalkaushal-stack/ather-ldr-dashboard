@@ -2739,9 +2739,6 @@ const SourceTab = React.memo(function SourceTab({ data, rawData, filters, months
         const c = bySrc.get(src)||[0,0]; c[1]+=r; bySrc.set(src,c);
       }
     }
-    // Override gR with direct count from retail sheet (no join dependency)
-    const _arbmM=(data.atherRetailByMonth||{})[M];
-    if(_arbmM!==undefined)gR=_arbmM;
     // Pass 3: Non-Scope Retail (NR) — iterate nsRetailRows, filter by invoiceMonth + active filters
     const nsRows = nsRetailRows || [];
     const nrBySrc = new Map();
@@ -2938,11 +2935,6 @@ const SourceTab = React.memo(function SourceTab({ data, rawData, filters, months
         const c=bySrc.get(src)||[0,0]; c[1]+=r; bySrc.set(src,c);
       }
     }
-    // Override gR with direct count from retail sheet for selected months
-    const _arbm=data.atherRetailByMonth||{};
-    let _crossR=0;
-    for(const _m of mSet){if(_arbm[_m]!==undefined)_crossR+=_arbm[_m];}
-    if(_crossR>0)gR=_crossR;
     // Pass 3 (cross-month): Non-Scope Retail
     const nsRows2 = nsRetailRows || [];
     const nrBySrc2 = new Map();
@@ -3977,9 +3969,6 @@ const ModelSourceTab = React.memo(function ModelSourceTab({ data, rawData, filte
     var purMdlDimFn = function(row, maps){ var purMdl=maps.purMdl[row[0]]||'Unknown'; return (!allMdl && !filters.models.has(purMdl)) ? null : purMdl; };
     var retailAgg = aggMonth(pmsm, maps, M, filters.sources, purMdlDimFn, srcFn, monthFn, null, getLR);
     var agg = mergeLeadRetailAggs(leadsAgg, retailAgg);
-    // Override grand retail total with direct retail sheet count (matches Source Analysis)
-    var arbm = (data.atherRetailByMonth || {})[M];
-    if (arbm !== undefined) agg = { ...agg, grand: { l: agg.grand.l, r: arbm, l2r: agg.grand.l > 0 ? arbm/agg.grand.l*100 : 0 } };
     return agg;
   }, [mmLead, pmsm, maps, filters, getLR, data.atherRetailByMonth]);
   return ce(MonthlyGrids, { title:'Model Performance', months:months, renderAgg:renderAgg, srcGroups:srcGroups, dimLabel:'Model', expandedGrps:expandedGrps, onToggleGrp:onToggleGrp, viewerMode:viewerMode, onDetailedCsv:onDetailedCsv });
