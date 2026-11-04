@@ -616,6 +616,8 @@ function parseAtherLeadRows(raw){
     const encryptMobile=get(r,['encrypt mobile number','encrypt_mobile_number','encrypted mobile','mobile number (encrypted)','encryptmobile','mobile']);
     const idVerifiedLead=get(r,['id_verified_lead','id verified lead','id verified','idverifiedlead','id_verified']);
     const brand=get(r,['brand','oem','manufacturer','make']);
+    // Skip non-Ather leads (e.g. Hero, Honda) that appear in multi-brand sheets
+    if(brand&&!brand.toLowerCase().includes('ather'))continue;
     const verifiedDealer=get(r,['verified_dealer','verified dealer','verifieddealer','dealer']);
     const dealerId=get(r,['dealer_id','dealerid','dealer id']);
     const oemCrmId=get(r,['oem_crm_id','oemcrmid','oem crm id','crm id','crm_id','oem crm']);
