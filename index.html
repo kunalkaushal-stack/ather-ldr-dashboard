@@ -561,7 +561,7 @@ function parseAtherLeadRows(raw){
   // (the Unique entry handles the retail join). If no in-scope Unique entry exists — because
   // the Unique row was created before Jan'25 and excluded by the parse floor — the Duplicate
   // row is the only way to attribute that lead's retail, so it's allowed through.
-  const leadParseFloor=atherMonthOrder("Jan'2025");
+  const leadParseFloor=atherMonthOrder("May'2026");
   const DUP_ALIASES=['duplicate check','duplicity check','duplicate','is duplicate','isdup','is_duplicate'];
   const OPTY_ALIASES=['opty_id','opty id','lead id','leadid','lead_id','opportunity id','opportunity_id'];
   const LM_ALIASES=['lead month','lead_month','leadmonth','month'];
@@ -584,13 +584,13 @@ function parseAtherLeadRows(raw){
     const lead_month_raw=get(r,LM_ALIASES);
     const lead_month=normalizeAtherMonth(lead_month_raw);
     if(!opty_id||!lead_month)continue; // structural skip (not counted in cutoff diagnostics)
-    // PRIMARY GATE: Lead_Month must be Jan'2025 or later.
+    // PRIMARY GATE: Lead_Month must be May'2026 or later.
     // NOTE: lead_month is sourced from the 'lead_month'/'lead month'/'month' COLUMN in the sheet.
     // The auto-detected date column (leadDateColKey) is used ONLY to populate leadDate for
     // day-level Dispersion (BDM) calculations — it does NOT determine lead_month.
     const lmo=atherMonthOrder(lead_month);
     if(lmo===0){excludedInvalidDate++;continue;} // unparseable month
-    if(lmo<leadParseFloor){excludedBeforeCutoff++;continue;} // before Jan'2025 → exclude
+    if(lmo<leadParseFloor){excludedBeforeCutoff++;continue;} // before May'2026 → exclude
     const dup=get(r,DUP_ALIASES);
     const isUnique=dup?dup.toLowerCase()==='unique':true;
     // Skip Duplicate only if its opty_id already has an in-scope Unique entry.
