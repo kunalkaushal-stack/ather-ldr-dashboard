@@ -233,9 +233,10 @@ const ATHER_LEAD_MASTER_BY_MONTH = {
   "May'2026": "https://docs.google.com/spreadsheets/d/1jnhdvPUEefW7HrD44ffvH2k3v0eUe2JGolXkX6EIKbQ/edit?gid=2013005874#gid=2013005874",
   "Jun'2026": "https://docs.google.com/spreadsheets/d/1qAvzs6ucsPtk3joTsYeHijk2Tx_JRcCBsXzKDbnEOPc/edit?gid=2013005874#gid=2013005874",
   "Jul'2026": "https://docs.google.com/spreadsheets/d/1t29vI-JdKu7HDaaLX33N3wFnhylFLbOkwPhyWc6ZKiA/edit?gid=2013005874#gid=2013005874",
-  "Aug'2026": "https://docs.google.com/spreadsheets/d/1tkvHOk6S3tdl1Mdzcfi1b5B8yeyIcWXtKs3jmiVroDM/edit?gid=2013005874#gid=2013005874",
-  "Sep'2026": "https://docs.google.com/spreadsheets/d/1WgyRvNW02UxCYyhQDLfaFa86RciciSeGXeQmBF7ymIg/edit?gid=2013005874#gid=2013005874",
-  "Oct'2026": "https://docs.google.com/spreadsheets/d/1MdlYzXsJ1rAZ1PfVDNXE7n8IGaHQuoW25QHh3tq6XRc/edit?gid=2013005874#gid=2013005874",
+  "Aug'2026": "https://docs.google.com/spreadsheets/d/18oNdrfWNJjZkpBRe3dsoj8r-auOVeZyad9dbJ1lIMAo/edit?gid=2013005874#gid=2013005874",
+  "Sep'2026": "https://docs.google.com/spreadsheets/d/1tkvHOk6S3tdl1Mdzcfi1b5B8yeyIcWXtKs3jmiVroDM/edit?gid=2013005874#gid=2013005874",
+  "Oct'2026": "https://docs.google.com/spreadsheets/d/1WgyRvNW02UxCYyhQDLfaFa86RciciSeGXeQmBF7ymIg/edit?gid=1691488845#gid=1691488845",
+  "Nov'2026": "https://docs.google.com/spreadsheets/d/1MdlYzXsJ1rAZ1PfVDNXE7n8IGaHQuoW25QHh3tq6XRc/edit?gid=2013005874#gid=2013005874",
 };
 
 const ATHER_SHEETS_CONFIG = Object.freeze({
@@ -634,10 +635,21 @@ function parseAtherLeadRows(raw){
       encryptMobile,idVerifiedLead,brand,verifiedDealer,dealerId,oemCrmId,dealerName,enquiryId,utmCampaign,statusName
     });
   }
-  const uniqueIds=new Set(rows.map(r=>r.opty_id)).size;
+  // Cross-sheet dedup: monthly sheets may overlap (e.g. Aug sheet includes Jul rows).
+  // Keep the FIRST occurrence of each opty_id (earlier month sheet wins).
+  const crossSheetSeenOpty=new Set();
+  const dedupedRows=[];
+  let excludedCrossSheetDup=0;
+  for(const r of rows){
+    if(crossSheetSeenOpty.has(r.opty_id)){excludedCrossSheetDup++;continue;}
+    crossSheetSeenOpty.add(r.opty_id);
+    dedupedRows.push(r);
+  }
+  if(excludedCrossSheetDup>0)console.log('[ATHER PIPELINE] Cross-sheet dup exclusions:',excludedCrossSheetDup,'(same opty_id appeared in multiple month sheets)');
+  const uniqueIds=new Set(dedupedRows.map(r=>r.opty_id)).size;
   const statusNameRawKey=keyMap['status_name']||keyMap['status name']||keyMap['statusname']||'';
-  const statusNameNonBlankCount=rows.filter(r=>r.statusName&&r.statusName.trim()!=='').length;
-  return{rows,diagnostics:{totalRows:raw.length,included:rows.length,uniqueIds,dupIds:rows.length-uniqueIds,excludedBeforeCutoff,excludedInvalidDate,excludedDupHasUnique,earliestDate,latestDate,detectedDateCol,sampleDateValues,allLeadCols,statusNameRawKey,statusNameNonBlankCount,webIdDetectedCol:webIdRawKey||'(not detected)'}};
+  const statusNameNonBlankCount=dedupedRows.filter(r=>r.statusName&&r.statusName.trim()!=='').length;
+  return{rows:dedupedRows,diagnostics:{totalRows:raw.length,included:dedupedRows.length,uniqueIds,dupIds:dedupedRows.length-uniqueIds,excludedBeforeCutoff,excludedInvalidDate,excludedDupHasUnique,excludedCrossSheetDup,earliestDate,latestDate,detectedDateCol,sampleDateValues,allLeadCols,statusNameRawKey,statusNameNonBlankCount,webIdDetectedCol:webIdRawKey||'(not detected)'}};
 }
 
 function parseAtherRetailRows(raw){
@@ -681,11 +693,10 @@ function parseAtherRetailRows(raw){
   // Collect eligibility value distribution for diagnostics
   const eligValMap=new Map();
   const rows=[];
-  let excludedEligibility=0,excludedKey=0,excludedMonth=0,excludedDupOrderId=0,excludedConvAge=0;
+  let excludedEligibility=0,excludedKey=0,excludedMonth=0,excludedConvAge=0;
   let maxRetailDate=null;
   const rawKeySamples=[];
   const includedModelMap=new Map();
-  const seenOrderIds=new Set(); // deduplicate by Order ID
   for(const r of raw){
     // Track all eligibility values
     const elig=eligColKey?String(r[eligColKey]||'').trim():get(r,ELIG_ALIASES);
@@ -699,12 +710,8 @@ function parseAtherRetailRows(raw){
     const performanceMonth=normalizeAtherMonth(get(r,['retail month','retailmonth','retail_month',
       'performance month','performancemonth','performance_month','month']));
     if(!performanceMonth||atherMonthOrder(performanceMonth)<CUTOFF_MONTH_ORDER_CLEAR){excludedMonth++;continue;}
-    // Order ID dedup: skip if this Order ID already attributed
+    // Order ID extracted (dedup applied externally via toggle — not filtered here)
     const orderId=orderIdColKey?String(r[orderIdColKey]||'').trim():get(r,ORDER_ID_ALIASES);
-    if(orderId){
-      if(seenOrderIds.has(orderId)){excludedDupOrderId++;continue;}
-      seenOrderIds.add(orderId);
-    }
     // Filter: Retail Conversion Age > 90 → exclude
     if(convAgeColKey){
       const ca=parseFloat(r[convAgeColKey]);
@@ -724,12 +731,12 @@ function parseAtherRetailRows(raw){
     rows.push({sourceLeadId,orderId,performanceMonth,callType,retailDate,purchasedModel});
   }
   const uniqueIds=new Set(rows.map(r=>r.sourceLeadId)).size;
-  const uniqueOrders=seenOrderIds.size;
+  const uniqueOrders=new Set(rows.map(r=>r.orderId).filter(Boolean)).size;
   const eligibilityValues=[...eligValMap.entries()].sort((a,b)=>b[1]-a[1]).slice(0,20).map(([v,c])=>v+'('+c+')');
   const includedModelValues=[...includedModelMap.entries()].sort((a,b)=>b[1]-a[1]);
   return{rows,diagnostics:{
     totalRows:raw.length,reRows:rows.length,uniqueIds,uniqueOrders,
-    excludedEligibility,excludedKey,excludedMonth,excludedDupOrderId,excludedConvAge,
+    excludedEligibility,excludedKey,excludedMonth,excludedDupOrderId:0,excludedConvAge,
     eligibilityColFound:!!eligColKey,leadIdColFound:!!leadIdColKey,
     orderIdColFound:!!orderIdColKey,convAgeColFound:!!convAgeColKey,
     retailMonthColFound:!!(keyMap['retail month']||keyMap['retailmonth']||keyMap['retail_month']),
@@ -2167,7 +2174,7 @@ const OverviewTab = React.memo(function OverviewTab({ data, filters, RT }) {
       if(!byMonth.has(m))byMonth.set(m,[0,0]);
     }
     return [...byMonth.entries()]
-      .sort((a,b) => monthOrder(a[0]) - monthOrder(b[0]))
+      .sort((a,b) => monthOrder(b[0]) - monthOrder(a[0]))
       .map(([m, v]) => {
         const r=atherRetailByMonth[m]!==undefined?atherRetailByMonth[m]:v[1];
         return { m, l:v[0], r, l2r:v[0]>0?r/v[0]*100:0 };
@@ -3029,7 +3036,7 @@ const PivotTab = React.memo(function PivotTab({ data, filters, months, RT, onDet
   const [metrics,    setMetrics]    = useState(['leads']);
   const [sortBy,     setSortBy]     = useState('__total__');
   const [sortDir,    setSortDir]    = useState('desc');
-  const [topN,       setTopN]       = useState(20);
+  const [topN,       setTopN]       = useState(0);
   const [collapsed,  setCollapsed]  = useState(new Set());
   const [addRowOpen, setAddRowOpen] = useState(false);
   const [addColOpen, setAddColOpen] = useState(false);
@@ -3588,16 +3595,6 @@ const PivotTab = React.memo(function PivotTab({ data, filters, months, RT, onDet
         )
       ),
 
-      ce('div', null,
-        ce('div', { style:{fontSize:10,fontWeight:700,color:'#64748B',textTransform:'uppercase',letterSpacing:'0.08em',marginBottom:6} }, 'Show'),
-        ce('select', { value:topN, onChange:e=>setTopN(+e.target.value), style:selSt },
-          ce('option',{value:10 },'Top 10'),
-          ce('option',{value:20 },'Top 20'),
-          ce('option',{value:50 },'Top 50'),
-          ce('option',{value:100},'Top 100'),
-          ce('option',{value:0  },'All rows'),
-        )
-      ),
 
       !unsupported && !noData && !awaitingPipeline &&
         ce('div', { style:{marginLeft:'auto',alignSelf:'flex-end',paddingTop:20,display:'flex',gap:6} },
@@ -4852,6 +4849,26 @@ function App({fbUser,role,presence,onSignOut,onAdminOpen}){
   const [isPending,startT]=useTransition();
   const [detailModal,setDetailModal]=useState(null);
   const [fontScale,setFontScale]=useState(1.00);
+  const [orderIdDedup,setOrderIdDedup]=useState(true);
+  const orderIdDedupRef=useRef(true);
+  const leadResultRef=useRef(null);
+  const retailResultRef=useRef(null);
+  useEffect(()=>{orderIdDedupRef.current=orderIdDedup;},[orderIdDedup]);
+  useEffect(()=>{
+    if(!leadResultRef.current||!retailResultRef.current)return;
+    const seen=new Set();
+    const filteredRows=orderIdDedup
+      ?retailResultRef.current.rows.filter(r=>{if(!r.orderId)return true;if(seen.has(r.orderId))return false;seen.add(r.orderId);return true;})
+      :retailResultRef.current.rows;
+    const filteredResult={...retailResultRef.current,rows:filteredRows};
+    const{rows:joined2}=joinREData(leadResultRef.current,filteredResult);
+    const payload2=buildPayload(joined2);
+    const arbm={};
+    for(const rr of filteredRows){arbm[rr.performanceMonth]=(arbm[rr.performanceMonth]||0)+1;}
+    setRawJoined(joined2);
+    setData(d=>d?{...payload2,retailTillDate:retailResultRef.current.maxRetailDate,atherRetailByMonth:arbm}:null);
+    window.__atherJoined=joined2;
+  },[orderIdDedup]);
   useEffect(()=>{document.documentElement.style.setProperty('--dashboard-font-scale',fontScale);},[fontScale]);
   const decFont=useCallback(()=>setFontScale(s=>{const i=FONT_STEPS.indexOf(+s.toFixed(2));return i>0?FONT_STEPS[i-1]:s;}),[]);
   const incFont=useCallback(()=>setFontScale(s=>{const i=FONT_STEPS.indexOf(+s.toFixed(2));return i<FONT_STEPS.length-1?FONT_STEPS[i+1]:s;}),[]);
@@ -4865,7 +4882,17 @@ function App({fbUser,role,presence,onSignOut,onAdminOpen}){
         Promise.all(monthEntries.map(([,url])=>fetchSheetCsv(url))),
         fetchSheetCsv(ATHER_SHEETS_CONFIG.RETAIL_URL),
       ]);
-      const leadRaw=monthCsvs.flatMap(csv=>parseCsvToRows(csv));
+      const leadRaw=monthCsvs.flatMap((csv,idx)=>{
+        const rows=parseCsvToRows(csv);
+        console.log('[ATHER PIPELINE] Sheet',monthEntries[idx][0],'→',rows.length,'raw rows');
+        // Normalize all column keys to lowercase so cross-sheet column-name capitalization
+        // differences (e.g. Lead_Month vs lead_month) don't silently drop rows
+        return rows.map(row=>{
+          const norm={};
+          Object.entries(row).forEach(([k,v])=>{norm[k.toLowerCase().replace(/\s+/g,' ').trim()]=v;});
+          return norm;
+        });
+      });
       const retailRaw=parseCsvToRows(retailCSV);
       // \u2500\u2500 PIPELINE COLUMN DETECTION (before parse functions) \u2500\u2500
       (function atherPipelineColLog(){
@@ -4924,7 +4951,16 @@ function App({fbUser,role,presence,onSignOut,onAdminOpen}){
       if(!leadRaw.length)throw new Error('No rows in Leads sheet \u2014 ensure it is shared as Anyone \u2192 Viewer.');
       const leadResult=parseAtherLeadRows(leadRaw);
       const retailResult=parseAtherRetailRows(retailRaw);
-      const{rows:joined,diagnostics:diag}=joinREData(leadResult,retailResult);
+      // Store raw results so the Order ID Dedup toggle can re-run join without re-fetching
+      leadResultRef.current=leadResult;
+      retailResultRef.current=retailResult;
+      // Apply Order ID dedup if toggle is ON
+      const _oidSeen=new Set();
+      const retailRowsForJoin=orderIdDedupRef.current
+        ?retailResult.rows.filter(r=>{if(!r.orderId)return true;if(_oidSeen.has(r.orderId))return false;_oidSeen.add(r.orderId);return true;})
+        :retailResult.rows;
+      const retailResultForJoin={...retailResult,rows:retailRowsForJoin};
+      const{rows:joined,diagnostics:diag}=joinREData(leadResult,retailResultForJoin);
       // ── JOIN SAMPLING IIFE (diagnose state + retail pipeline) ──
       (function atherJoinSample(){
         try{
@@ -4989,9 +5025,9 @@ function App({fbUser,role,presence,onSignOut,onAdminOpen}){
       diag.retailExcludedKey=rd2.excludedKey||0;
       diag.retailRawKeySamples=rd2.rawDateSamples||[];
       diag.retailReRows=rd2.reDateCount||0;
-      // Direct retail count from sheet: unique eligible Order IDs per Retail Month
+      // Direct retail count from sheet: per Retail Month (uses dedup-filtered rows)
       const atherRetailByMonth={};
-      for(const rr of retailResult.rows){
+      for(const rr of retailRowsForJoin){
         const m=rr.performanceMonth;
         atherRetailByMonth[m]=(atherRetailByMonth[m]||0)+1;
       }
@@ -5307,6 +5343,12 @@ function App({fbUser,role,presence,onSignOut,onAdminOpen}){
           ce('button',{onClick:()=>setLeadsMode('update'),
             style:{padding:'4px 8px',fontSize:9,fontWeight:700,fontFamily:'inherit',border:'none',borderRadius:18,cursor:'pointer',transition:'all 120ms',
               background:leadsMode==='update'?'#164E63':'transparent',color:leadsMode==='update'?'#fff':'#64748B',whiteSpace:'nowrap'}},'On Update'),
+        ),
+        !clientMode&&ce('div',{style:{display:'flex',alignItems:'center',background:'#F1F5F9',borderRadius:20,padding:'2px',border:'1px solid #E2E8F0',flexShrink:0},title:'Toggle Order ID deduplication for retail rows'},
+          ce('button',{onClick:()=>setOrderIdDedup(d=>!d),
+            style:{padding:'4px 10px',fontSize:9,fontWeight:700,fontFamily:'inherit',border:'none',borderRadius:18,cursor:'pointer',transition:'all 120ms',
+              background:orderIdDedup?'#0F766E':'transparent',color:orderIdDedup?'#fff':'#64748B',whiteSpace:'nowrap'}},
+            (orderIdDedup?'✓ ':'✕ ')+'Ord. Dedup'),
         ),
         ce('div',{style:{borderLeft:'1px solid rgba(255,255,255,.25)',paddingLeft:10,marginLeft:4,flexShrink:0}},
           ce(PresenceStrip,{presence,fbUser,role,onSignOut,onAdminOpen})
