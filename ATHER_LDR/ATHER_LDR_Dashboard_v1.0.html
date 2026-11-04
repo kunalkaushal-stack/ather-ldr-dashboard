@@ -4896,6 +4896,82 @@ const ActionPlanTab = React.memo(function ActionPlanTab({ data, rawJoined, filte
 /* ════════════════════════════════════════════════════════════════════
    APP ROOT — Ather LDR Dashboard
    ════════════════════════════════════════════════════════════════════ */
+/* ════════════════════════════════════════════════════════════════════
+   RETAIL VINTAGE TAB — retails by lead-cohort age (M1 = retailed in the lead's own month)
+   Standalone: reads rawJoined / nsRetailRows only, ignores the global filters and mode toggle.
+   ════════════════════════════════════════════════════════════════════ */
+const VINTAGE_MONTHS=["May'2026","Jun'2026","Jul'2026","Aug'2026","Sep'2026","Oct'2026","Nov'2026"];
+const VINTAGE_AGES=[4,3,2,1];
+const VintageTab = React.memo(function VintageTab({ rawJoined, nsRetailRows, viewerMode }) {
+  const [incNB, setIncNB] = useState(false);
+  const M = VINTAGE_MONTHS;
+  const calc = useMemo(() => {
+    const idxOf = new Map(M.map((m,i)=>[m,i]));
+    const leads = M.map(()=>0);
+    const cnt = {}; for (const a of VINTAGE_AGES) cnt[a] = M.map(()=>0);
+    let outside = 0;
+    const put = (lm, bm) => {
+      const bj = idxOf.get(bm);
+      if (bj === undefined) return;
+      const age = bj - (idxOf.has(lm) ? idxOf.get(lm) : -99) + 1;
+      if (age >= 1 && age <= 4 && bj - (age - 1) >= 0) cnt[age][bj]++; else outside++;
+    };
+    for (const r of (rawJoined||[])) {
+      const li = idxOf.get(r.lead_month);
+      if (li !== undefined) leads[li]++;
+      if (r.isBooked && r.booking_month) put(r.lead_month, r.booking_month);
+    }
+    if (incNB) for (const r of (nsRetailRows||[])) { if (r.kind === 'nonbd') put(r.leadMonth, r.invoiceMonth); }
+    const tot = M.map((_,j)=>VINTAGE_AGES.reduce((s,a)=>s+cnt[a][j],0));
+    return { leads, cnt, tot, outside };
+  }, [rawJoined, nsRetailRows, incNB]);
+  const lbl = m => m.replace("'20","-");
+  const thSt = { background:'#1D4ED8', color:'#fff', textAlign:'right', padding:'6px 12px' };
+  const cell = { textAlign:'right', padding:'6px 12px', fontFamily:'DM Mono,monospace' };
+  const cohortLeads = (a,j) => { const ci=j-(a-1); return ci>=0?calc.leads[ci]:0; };
+  const crOf = (a,j) => { const l=cohortLeads(a,j); return l>0?calc.cnt[a][j]/l*100:0; };
+  const exportAll = () => {
+    const aoa=[['Retails'+(incNB?' (incl. Non-BD)':''),...M.map(lbl)],['Leads',...calc.leads]];
+    for (const a of VINTAGE_AGES) aoa.push(['M'+a,...M.map((_,j)=>calc.cnt[a][j]||'')]);
+    aoa.push(['Total',...calc.tot],[],['CR%',...M.map(lbl)]);
+    for (const a of VINTAGE_AGES) aoa.push(['M'+a,...M.map((_,j)=>calc.cnt[a][j]?+crOf(a,j).toFixed(2):'')]);
+    exportCsv(aoa,'Retail_Vintage'+(incNB?'_Total':'')+'.csv');
+  };
+  const head = (title) => ce('thead',null,ce('tr',null,
+    ce('th',{className:'left',style:{...thSt,textAlign:'left',minWidth:90}},title),
+    ...M.map(m=>ce('th',{key:m,style:thSt},lbl(m)))));
+  const btn = (on,label,fn) => ce('button',{onClick:fn,style:{padding:'5px 12px',fontSize:11,fontWeight:700,fontFamily:'inherit',border:'1px solid #CBD5E1',borderRadius:18,cursor:'pointer',
+    background:on?'#164E63':'#fff',color:on?'#fff':'#475569'}},label);
+  return ce('div',{className:'fade-up'},
+    ce('div',{className:'card',style:{padding:'14px 18px',marginBottom:14,display:'flex',alignItems:'center',gap:12,flexWrap:'wrap'}},
+      ce('div',{className:'section-title',style:{marginBottom:0}},'Retail Vintage — lead cohort age (M1 = retailed in the month the lead was created)'),
+      ce('div',{style:{display:'flex',gap:6,marginLeft:'auto',alignItems:'center'}},
+        btn(!incNB,'Retail',()=>setIncNB(false)),
+        btn(incNB,'Total Retail (incl. Non-BD)',()=>setIncNB(true)),
+        viewerMode?ce(ViewerCsvGate,null):ce(CsvBtn,{onClick:exportAll}))),
+    ce('div',{className:'card',style:{padding:'16px 18px',marginBottom:14}},
+      ce('div',{className:'scroll-x'},ce('table',null,head('Ather'),
+        ce('tbody',null,ce('tr',null,ce('td',{className:'label',style:{fontWeight:800}},'Leads'),
+          ...M.map((m,j)=>ce('td',{key:m,style:{...cell,fontWeight:700}},Nf(calc.leads[j]))))))),
+      ce('div',{style:{height:14}}),
+      ce('div',{className:'scroll-x'},ce('table',null,head('Retails'),
+        ce('tbody',null,
+          ...VINTAGE_AGES.map(a=>ce('tr',{key:a},ce('td',{className:'label'},'M'+a),
+            ...M.map((m,j)=>ce('td',{key:m,style:{...cell,color:'#0891B2',fontWeight:600}},calc.cnt[a][j]>0?Nf(calc.cnt[a][j]):'')))),
+          ce('tr',{className:'total-row'},ce('td',{className:'label'},'Total'),
+            ...M.map((m,j)=>ce('td',{key:m,style:{...cell,fontWeight:800}},calc.tot[j]>0?Nf(calc.tot[j]):'')))))),
+      ce('div',{style:{height:14}}),
+      ce('div',{className:'scroll-x'},ce('table',null,head('CR%'),
+        ce('tbody',null,
+          ...VINTAGE_AGES.map(a=>ce('tr',{key:a},ce('td',{className:'label'},'M'+a),
+            ...M.map((m,j)=>ce('td',{key:m,style:{...cell,color:'#D97706',fontWeight:600}},calc.cnt[a][j]>0&&cohortLeads(a,j)>0?crOf(a,j).toFixed(1)+'%':'')))))))
+      ,ce('div',{style:{marginTop:10,fontSize:11,color:'#64748B'}},
+        'Mx = lead created x−1 months before the retail month. CR% = retails ÷ leads of the cohort month. '+
+        (calc.outside>0?Nf(calc.outside)+' retails (leads before May’26 or older than M4) are not shown.':''))
+    )
+  );
+});
+
 const FONT_STEPS=[0.85,0.90,0.95,1.00,1.05,1.10,1.15,1.20,1.25];
 const FONT_MIN=FONT_STEPS[0],FONT_MAX=FONT_STEPS[FONT_STEPS.length-1];
 const TABS = [
@@ -4906,6 +4982,7 @@ const TABS = [
   { id:'statexsrc',       label:'State Performance' },
   { id:'geodealer',       label:'Geo & Dealer' },
   { id:'pivot',           label:'Pivot Table' },
+  { id:'vintage',         label:'Retail Vintage' },
   { id:'diagnosis',       label:'Diagnosis' },
   { id:'forecast',        label:'Forecast' },
   { id:'actionplan',      label:'Action Plan' },
@@ -5365,6 +5442,7 @@ function App({fbUser,role,presence,onSignOut,onAdminOpen}){
       case 'cityxmodel':  return ce(CityModelTab,     props);
       case 'geodealer':       return ce(GeoAndDealerTab,      {...props,rawJoined,leadsMode});
       case 'pivot':       return ce(PivotTab,         {...props,rawJoined,leadsMode,nsRetailRows});
+      case 'vintage':     return ce(VintageTab,     {rawJoined,nsRetailRows,viewerMode});
       case 'diagnosis':   return ce(DiagnosisTab,   {...props,rawJoined});
       case 'forecast':    return ce(ForecastTab,    {...props,rawJoined});
       case 'actionplan':  return ce(ActionPlanTab,  {...props,rawJoined});
