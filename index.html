@@ -800,7 +800,8 @@ function buildNsRetailRows(leadRows,eligibleRetailRows,ineligibleRows){
   const mk=(kind,x,l)=>({kind,invoiceMonth:x.invoiceMonth||x.performanceMonth,leadMonth:l?l.lead_month:(x.leadMonth||''),
     source:(l&&l.source)||x.medium||'Unknown',
     state:l?l.state:(canonicalState(x.state)||'Unknown'),city:l?l.city:(x.city||'Unknown'),
-    lt:l?l.lt:'Unknown',model:l?l.model:(canonicalModel(canonEnqModel(x.enqModel))||'Unknown')});
+    lt:l?l.lt:'Unknown',model:l?l.model:(canonicalModel(canonEnqModel(x.enqModel==='-'?'':x.enqModel))||'Unknown'),
+    callType:x.callType||'other',purchasedModel:x.purchasedModel||''});
   const out=[];
   for(const x of(ineligibleRows||[]))out.push(mk('inelig',x,leadById.get(x.sourceLeadId)));
   for(const x of eligibleRetailRows){if(!leadById.has(x.sourceLeadId))out.push(mk('nonbd',x,null));}
@@ -3079,7 +3080,7 @@ const SourceTab = React.memo(function SourceTab({ data, rawData, filters, months
 /* ════════════════════════════════════════════════════════════════════
    WEB ID TAB  (Direct Push / L1 Nurtured dimension)
    ════════════════════════════════════════════════════════════════════ */
-const PivotTab = React.memo(function PivotTab({ data, filters, months, RT, onDetailedCsv, rawJoined, leadsMode, viewerMode }) {
+const PivotTab = React.memo(function PivotTab({ data, filters, months, RT, onDetailedCsv, rawJoined, leadsMode, viewerMode, nsRetailRows }) {
   const { maps } = data;
   const COL_SEP = '\x00';
 
@@ -3109,6 +3110,7 @@ const PivotTab = React.memo(function PivotTab({ data, filters, months, RT, onDet
     { key:'leads',  label:'Leads'    },
     { key:'leadpct', label:'L.Contrib%' },
     { key:'ret',    label:'Retails'  },
+    { key:'totret', label:'Total'    },
     { key:'retlpct', label:'R.Contrib%' },
     { key:'retpct', label:'Retail %' },
     { key:'dms',    label:'DMS'      },
@@ -3127,6 +3129,7 @@ const PivotTab = React.memo(function PivotTab({ data, filters, months, RT, onDet
     if (!vals) return 0;
     if (m === 'leads')  return vals[0] || 0;
     if (m === 'ret')    return getRetVal(vals);
+    if (m === 'totret') return getRetVal(vals) + (vals[4] || 0);
     if (m === 'retpct') return vals[0] > 0 ? (getRetVal(vals) / vals[0]) * 100 : 0;
     if (m === 'dms')    return vals[2] || 0;
     if (m === 'call')   return vals[3] || 0;
@@ -3171,7 +3174,7 @@ const PivotTab = React.memo(function PivotTab({ data, filters, months, RT, onDet
   }
 
   function accVals(tgt, cKey, row, nDims) {
-    if (!tgt.has(cKey)) tgt.set(cKey, [0, 0, 0, 0]);
+    if (!tgt.has(cKey)) tgt.set(cKey, [0, 0, 0, 0, 0]);
     const c = tgt.get(cKey);
     c[0] += row[nDims]     || 0;
     c[1] += row[nDims + 1] || 0;
@@ -3223,17 +3226,46 @@ const PivotTab = React.memo(function PivotTab({ data, filters, months, RT, onDet
       colSet.add(ck);
       if (!tbl.has(r1)) tbl.set(r1, { sub: new Map(), children: new Map() });
       const e = tbl.get(r1);
-      if (!e.sub.has(ck)) e.sub.set(ck, [0, 0, 0, 0]);
+      if (!e.sub.has(ck)) e.sub.set(ck, [0, 0, 0, 0, 0]);
       const sv = e.sub.get(ck); sv[0]+=L; sv[1]+=R; sv[2]+=Rd; sv[3]+=Rc;
       if (r2 !== null) {
         if (!e.children.has(r2)) e.children.set(r2, new Map());
         const cm = e.children.get(r2);
-        if (!cm.has(ck)) cm.set(ck, [0, 0, 0, 0]);
+        if (!cm.has(ck)) cm.set(ck, [0, 0, 0, 0, 0]);
         const cv = cm.get(ck); cv[0]+=L; cv[1]+=R; cv[2]+=Rd; cv[3]+=Rc;
       }
     }
+    // Retails from non-BD leads (no lead record): slot 4, feeds the "Total" metric only
+    for (const r of (nsRetailRows || [])) {
+      if (r.kind !== 'nonbd') continue;
+      if (RT === 'dms' && r.callType !== 'dms') continue;
+      if (RT === 'co'  && r.callType !== 'co')  continue;
+      const effMonth = (leadsMode === 'create' && r.leadMonth) ? r.leadMonth : r.invoiceMonth;
+      if (!allM   && !mf.has(effMonth))   continue;
+      if (!allS   && !sf.has(r.source))   continue;
+      if (!allLT  && !ltf.has(r.lt))      continue;
+      if (!allMdl && !mdf.has(r.model))   continue;
+      if (!allSt  && !stf.has(r.state))   continue;
+      if (!allC   && !cf.has(r.city))     continue;
+      if (!allPurMdl && !pmf.has(canonPurMdl(r.purchasedModel||''))) continue;
+      const r1 = getDimVal(rowDims[0], r, effMonth);
+      const r2 = rowDims[1] ? getDimVal(rowDims[1], r, effMonth) : null;
+      const c0 = getDimVal(colDims[0], r, effMonth);
+      const ck = colDims[1] ? c0 + COL_SEP + getDimVal(colDims[1], r, effMonth) : c0;
+      colSet.add(ck);
+      if (!tbl.has(r1)) tbl.set(r1, { sub: new Map(), children: new Map() });
+      const e = tbl.get(r1);
+      if (!e.sub.has(ck)) e.sub.set(ck, [0, 0, 0, 0, 0]);
+      e.sub.get(ck)[4]++;
+      if (r2 !== null) {
+        if (!e.children.has(r2)) e.children.set(r2, new Map());
+        const cm = e.children.get(r2);
+        if (!cm.has(ck)) cm.set(ck, [0, 0, 0, 0, 0]);
+        cm.get(ck)[4]++;
+      }
+    }
     return { tbl, colLabels: [...colSet] };
-  }, [rawJoined, rowDims, colDims, filters, leadsMode]);
+  }, [rawJoined, rowDims, colDims, filters, leadsMode, nsRetailRows, RT]);
 
   const pm = metrics[0] || 'leads';
 
@@ -3423,8 +3455,8 @@ const PivotTab = React.memo(function PivotTab({ data, filters, months, RT, onDet
     let gl = 0;
     for (const { sub } of pivotResult.tbl.values()) {
       for (const [c, v] of sub) {
-        if (!colVals[c]) colVals[c] = [0, 0, 0, 0];
-        for (let i = 0; i < 4; i++) colVals[c][i] += v[i];
+        if (!colVals[c]) colVals[c] = [0, 0, 0, 0, 0];
+        for (let i = 0; i < 5; i++) colVals[c][i] += v[i] || 0;
         gl += v[0];
       }
     }
@@ -5332,7 +5364,7 @@ function App({fbUser,role,presence,onSignOut,onAdminOpen}){
       case 'statexmodel': return ce(StateModelTab,    props);
       case 'cityxmodel':  return ce(CityModelTab,     props);
       case 'geodealer':       return ce(GeoAndDealerTab,      {...props,rawJoined,leadsMode});
-      case 'pivot':       return ce(PivotTab,         {...props,rawJoined,leadsMode});
+      case 'pivot':       return ce(PivotTab,         {...props,rawJoined,leadsMode,nsRetailRows});
       case 'diagnosis':   return ce(DiagnosisTab,   {...props,rawJoined});
       case 'forecast':    return ce(ForecastTab,    {...props,rawJoined});
       case 'actionplan':  return ce(ActionPlanTab,  {...props,rawJoined});
